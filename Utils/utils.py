@@ -68,5 +68,3 @@ def load_opt_json(root):
     dct['loc_checkpoints'] = root
     return argparse.Namespace(**dct)
 
-
-
