@@ -61,6 +61,59 @@ def mRS_90d_2arms(input_dist,ID_treat_select, return_relative=False):
 	return p_evt_90d_mrs, p_noevt_90d_mrs, select_EVT, exclude_EVT
 
 
-#prob mortality is based on gender, age, and year
-#HR mortality is based on mrs 
+# simulate long term follow-up
+class SimulateLongTerm(object):
+    """
+    Inputs:
+        M: class initialized for mortality simulation
+        RS: class initialized for recurrent stroke simulation
+        C: class initialized to compute costs
+        Q: class initialized to compute QALYs
+        
+    Returns:
+        Result over the simulated follow up period as 
+        np.array with columns: [orgID,uniqueID,year,
+                                mRS01,mRS2,mRS3,mRS4,mRS5,mRS6,
+                                costs,QALYs]
+    """
+    
+    def __init__(self, 
+                 years_to_simulate,
+                 M,RS,C,Q,
+                 start_year = 2022
+                ):
+        self.M = M
+        self.RS = RS
+        self.C = C
+        self.Q = Q
+        
+        self.start_year=start_year
+        self.years_to_simulate = years_to_simulate
+    
+    def _probabilistic_resample(self):
+        # resample all parameters for probabilistic sensitivity analyses (PSA)
+        self.M._probabilistic_resample()
+        self.RS._probabilistic_resample()
+        self.C._probabilistic_resample()
+        self.Q._probabilistic_resample()
+    
+    def __call__(self,gender,age,mrs_start, IDs=[None]):
+        cur_mrs = mrs_start.copy()
+        cur_age = age
+        cur_year = self.start_year
+        out = []
+        for yearno in range(1,self.years_to_simulate+1):
+            cur_age+=1
+            cur_year+=1
+            # simulate mortality
+            cur_mrs, p_mort = self.M(gender,cur_year,cur_age,cur_mrs)
+            # simulate stroke recurrence
+            cur_mrs, p_restroke = self.RS(yearno,cur_age,cur_mrs)
+            #compute costs and qalys
+            costs = self.C(cur_mrs,yearno)
+            qalys = self.Q(cur_mrs,yearno)
+            #write everything to output format
+            row = [*IDs,yearno,*list(cur_mrs),*list(costs),*list(qalys)]
+            out.append(row)
+        return out
 

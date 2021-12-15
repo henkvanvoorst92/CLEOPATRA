@@ -10,11 +10,13 @@ class Mortality(object):
         years: optional; years to select
     
     Returns:
-        new mrs distribution or survival rate
+        new mrs distribution and mortality rate
     """
     
-    def __init__(self, p_mort_file, 
-                 HR_mrs = np.array([1.54,2.17,3.18,4.55,6.55]),
+    def __init__(self, 
+                 p_mort_file, 
+                 HR_mrs = np.array([1.5325,2.175,3.172,4.5525,6.55]),
+                 delta_HR_mrs = np.array([1.54,2.18,3.18,4.56,6.5575]),
                  years = np.arange(2021,2030)):
         #mortality probabilities
         mort_male = pd.read_excel(p_mort_file, 'male').iloc[:,:30]
@@ -25,10 +27,24 @@ class Mortality(object):
         self.dct_mort = {'M':mort_male[years].to_dict(),
                         'F':mort_female[years].to_dict()}
         
-        self.HR_mrs = HR_mrs
+        # HR from data by Hong et al: https://pubmed.ncbi.nlm.nih.gov/20133917/
+        self.HR_mrs_deterministic = HR_mrs
+        self.delta_HR_mrs = delta_HR_mrs
+        self._init_HR()
+
+    def _init_HR(self, probabilistic=False):
+        if not probabilistic:
+            self.HR_mrs = self.HR_mrs_deterministic
+        else:
+            out = []
+            for hr,dhr in zip(self.HR_mrs_deterministic,self.delta_HR_mrs):
+                mean = np.log(hr)
+                sigma = np.sqrt(abs(mean-np.log(dhr))*2)
+                out.append(np.random.lognormal(mean=mean, sigma=sigma))
+            self.HR_mrs = np.array(out)
         
-    def _init_prob_resample(self):
-        print('To implement probabilistic resampling of HR')
+    def _probabilistic_resample(self):
+        self._init_HR(probabilistic=True)
         
     def __call__(self,gender,year,age, mrs_dist=None):
         # input mRS distribution (mrs_dist) should always sum up to 1
