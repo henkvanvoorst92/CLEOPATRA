@@ -57,6 +57,7 @@ class Costs(object):
                 v = self._presim_inflation_adjust(v)
             
             self.dct_year_costs[y] = v
+
     def _probabilistic_resample(self):
         self._init_cost_vector(probabilistic=True)
     
@@ -70,7 +71,7 @@ class Costs(object):
     
     def __call__(self,mrs_dist,year):
         # costs beyond year 3 are set equal to year 3
-        mrs_costs = mrs_dist*self.dct_year_costs[np.clip(year,0,3)]
+        mrs_costs = mrs_dist*self.dct_year_costs[np.clip(year,1,3)]
         #correct for discounting and inflation
         mrs_costs = self._inflation_and_discouting(mrs_costs,year)
         return np.round(mrs_costs,2)

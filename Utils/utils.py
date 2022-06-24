@@ -43,9 +43,6 @@ def store_df(input, sav_loc, type, cols=None):
     elif type=='.ftr':
         df_out.to_feather(sav_loc)
 
-
-
-
 def store_opt_json(opt):
     p_json = os.path.join(opt.loc_checkpoints,'opt.json')
     dct = vars(opt)
