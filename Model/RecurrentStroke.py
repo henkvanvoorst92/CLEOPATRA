@@ -33,35 +33,36 @@ class RecurrentStroke(object):
         self._init_mrs_post_restroke()
 
     # restroke probability per year (ppy)
-    def _init_ppy(self, probabilistic=False): # NO RESAMPLING of p_restroke
+    def _init_ppy(self,mode='default'): # NO RESAMPLING of p_restroke
     	# Data by Pennlert et al: https://pubmed.ncbi.nlm.nih.gov/24788972/
         self.p_restroke_per_year = {}
         for y, p in zip(self.ppy['year'], self.ppy['p']):
             self.p_restroke_per_year[y] = p
-        #if probabilistic:
+        #if mode=='probabilistic':
             #print('To implement probabilistic ppy')
             #implement a sampling strategy for binomial probabilities
     
     # Hazard rate by age (and other vars)
-    def _init_HR(self, probabilistic=False):
+    def _init_HR(self, mode='default'):
         # Data by Pennlert et al: https://pubmed.ncbi.nlm.nih.gov/24788972/
 
         # per year HR 
         age = self.HR[self.HR['variable']=='age'].values[0,1:]
-        self.HR_age_mean, self.HR_age_lowCI, self.HR_age_upCI = age
+        self.HR_age_mean, self.HR_age_lowCI, self.HR_age_upCI, self.N_age = age
 
         DM = self.HR[self.HR['variable']=='DM'].values[0,1:]
-        self.HR_DM_mean, self.HR_DM_lowCI, self.HR_DM_upCI = DM
+        self.HR_DM_mean, self.HR_DM_lowCI, self.HR_DM_upCI, self.N_DM = DM
 
         HR_t = self.HR[self.HR['variable']=='2004_2008'].values[0,1:]
-        self.HR_t_mean, self.HR_t_lowCI, self.HR_t_upCI = HR_t
+        self.HR_t_mean, self.HR_t_lowCI, self.HR_t_upCI, self.N_t = HR_t
 
-        if not probabilistic:
+        if  mode=='default':
 	        self.HR_age =self.HR_age_mean
 	        self.HR_DM = self.HR_DM_mean
 	        self.HR_t = self.HR_t_mean
 
-        else:
+        elif  mode=='probabilistic':
+            
         	self.HR_age = np.random.lognormal(mean=np.log(self.HR_age_mean), 
         						sigma=abs(np.log(self.HR_age_lowCI)-np.log(self.HR_age_upCI))/3.92)
 
@@ -72,16 +73,16 @@ class RecurrentStroke(object):
 								sigma=abs(np.log(self.HR_t_lowCI)-np.log(self.HR_t_upCI))/3.92)
 
     
-    def _init_mrs_post_restroke(self,probabilistic=False):
-    	if not probabilistic:
+    def _init_mrs_post_restroke(self,mode='default'):
+    	if mode=='default':
     		self.mrs_post_restroke = self.p_mrs_postrestroke
-    	else: # resample mrs probabilities from dirichelet distribution
+    	elif mode=='probabilistic': # resample mrs probabilities from dirichelet distribution
     		self.mrs_post_restroke = np.random.dirichlet(self.p_mrs_postrestroke)
 
     def _probabilistic_resample(self):
         #self._init_ppy(probabilistic=True) # NO RESAMPLING of p_restroke
-        self._init_HR(probabilistic=True)
-        self._init_mrs_post_restroke(probabilistic=True)
+        self._init_HR(mode='probabilistic')
+        self._init_mrs_post_restroke(mode='probabilistic')
     
     def _compute_age_HR(self,age):
         ref_age = 64
@@ -117,3 +118,5 @@ class RecurrentStroke(object):
             out = None
             
         return out, p_restroke
+
+

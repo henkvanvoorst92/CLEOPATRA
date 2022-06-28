@@ -17,6 +17,7 @@ class Costs(object):
     
     def __init__(self, 
                  file,
+                 costs_IVT, costs_CTP, costs_EVT,
                  start_inflation=1.000, # inflation factor before simulation (2015 -> 2022)
                  discounting_rate=1.04,
                  inflation_rate=1.04,
@@ -26,20 +27,23 @@ class Costs(object):
         self.start_inflation = start_inflation
         self.discounting_rate = discounting_rate
         self.inflation_rate = inflation_rate
-        
+        #starting costs of treatment
+        self.costs_IVT = costs_IVT*self.start_inflation
+        self.costs_CTP = costs_CTP*self.start_inflation
+        self.costs_EVT = costs_EVT*self.start_inflation
         self._init_cost_vector()
         
-    def _init_cost_vector(self,probabilistic=False):
+    def _init_cost_vector(self,mode='default'):
         
         self.df = self.df.sort_values(by=['year','mRS'], ascending=True)
         #function initializes the mrs-costs vector
         self.dct_year_costs = {}
         for y in self.df['year'].unique():
             tmp = self.df[self.df['year']==y]
-            if not probabilistic:
+            if mode=='default':
                 # perform baseline simulations with mean values
                  v = tmp['mean'].values
-            else:
+            elif mode=='probabilistic':
                 #sample from gamma distribution
                 tmp.index = tmp['mRS']
                 v = np.zeros_like(tmp['mean'].values)
@@ -51,7 +55,10 @@ class Costs(object):
                     B = 1/(mean/std**2)
                     #sample new datapoint from gamma distribution
                     v[mrs-1] = np.random.gamma(A,B)
-            
+            #elif mode=='deterministic_low' 
+
+            #elif mode=='deterministic_high'
+
             #adjust costs to current year (default prices were in 2015)
             if self.start_inflation!=1.000:
                 v = self._presim_inflation_adjust(v)
@@ -59,7 +66,7 @@ class Costs(object):
             self.dct_year_costs[y] = v
 
     def _probabilistic_resample(self):
-        self._init_cost_vector(probabilistic=True)
+        self._init_cost_vector(mode='probabilistic')
     
     def _presim_inflation_adjust(self,costs):
         return costs*self.start_inflation
@@ -98,15 +105,15 @@ class QALYs(object):
         
         self._init_qaly_vector()
         
-    def _init_qaly_vector(self,probabilistic=False):
+    def _init_qaly_vector(self,mode='default'):
         
         self.df = self.df.sort_values(by=['mRS'], ascending=True)
         #function initializes the mrs-costs vector
         
-        if not probabilistic:
+        if mode=='default':
             # perform baseline simulations with mean values
              v = self.df['mean'].values
-        else:
+        elif mode=='probabilistic':
             mean = self.df['mean'].values
             std = self.df['std'].values
             #sample from gamma distribution
@@ -120,11 +127,13 @@ class QALYs(object):
                     v[ix] = 0
                 else:
                     v[ix] = np.random.beta(a,b)
-                
+        #elif mode=='deterministic_low' 
+
+        #elif mode=='deterministic_high'
         self.qaly_vector = v
             
     def _probabilistic_resample(self):
-        self._init_qaly_vector(probabilistic=True)
+        self._init_qaly_vector(mode='probabilistic')
     
     def _discounting(self,qalys,year):
         return qalys*self.discounting_rate**(1/year)

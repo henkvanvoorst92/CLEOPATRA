@@ -32,24 +32,28 @@ class Mortality(object):
         self.delta_HR_mrs = delta_HR_mrs
         self._init_HR()
 
-    def _init_HR(self, probabilistic=False):
-        if not probabilistic:
+    def _init_HR(self, mode='default'):
+        if mode=='default':
             self.HR_mrs = self.HR_mrs_deterministic
-        else:
+        elif mode=='probabilistic':
             out = []
             for hr,dhr in zip(self.HR_mrs_deterministic,self.delta_HR_mrs):
                 mean = np.log(hr)
                 sigma = np.sqrt(abs(mean-np.log(dhr))*2)
+                #print('Fill in sqrt(N) for accurate sigma!!!!' )
                 out.append(np.random.lognormal(mean=mean, sigma=sigma))
             self.HR_mrs = np.array(out)
-        
+        #elif mode=='deterministic_low' 
+
+        #elif mode=='deterministic_high'
+
     def _probabilistic_resample(self):
-        self._init_HR(probabilistic=True)
+        self._init_HR(mode='probabilistic')
         
-    def __call__(self,gender,year,age, mrs_dist=None):
+    def __call__(self,sex,year,age, mrs_dist=None):
         # input mRS distribution (mrs_dist) should always sum up to 1
 
-        p_mort = self.dct_mort[gender][year][age]
+        p_mort = self.dct_mort[sex][year][age]
         if mrs_dist is not None:
             p_mort = p_mort*self.HR_mrs*mrs_dist[:-1]
             #compute survival
