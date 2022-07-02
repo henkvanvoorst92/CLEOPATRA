@@ -17,7 +17,10 @@ class Mortality(object):
                  p_mort_file, 
                  HR_mrs = np.array([1.5325,2.175,3.172,4.5525,6.55]),
                  delta_HR_mrs = np.array([1.54,2.18,3.18,4.56,6.5575]),
-                 years = np.arange(2021,2030)):
+                 years = np.arange(2021,2030), verbal=False):
+
+        self.verbal = verbal
+
         #mortality probabilities
         mort_male = pd.read_excel(p_mort_file, 'male').iloc[:,:30]
         mort_male.index = mort_male['age']
@@ -54,8 +57,11 @@ class Mortality(object):
         # input mRS distribution (mrs_dist) should always sum up to 1
 
         p_mort = self.dct_mort[sex][year][age]
+
         if mrs_dist is not None:
-            p_mort = p_mort*self.HR_mrs*mrs_dist[:-1]
+            #compute probability of death per mRS by multiplying with dedicated HR
+            #clip to 0-1 otherwise probability can be>1 
+            p_mort = np.clip(p_mort*self.HR_mrs*mrs_dist[:-1],0.0,1.0)
             #compute survival
             psurv = 1-mrs_dist[:-1]*p_mort
             #output is new distribution
@@ -63,5 +69,9 @@ class Mortality(object):
             out = np.append(new_dist,1-new_dist.sum()) # add mortality
         else:
             out = None
+
+        if self.verbal:
+            print('Hazard rate:',self.HR_mrs)
+            print('Prob mortality and survival:',p_mort, psurv)
         return out, p_mort
 

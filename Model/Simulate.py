@@ -28,10 +28,10 @@ class ControlPatientGeneration(object):
         self.verbal = verbal  
         
         #initialize dictionary for OR extraction
-        OR = pd.read_excel(p_OR)
-        OR.index = OR.varname
-        self.OR = OR.to_dict(orient='index')
-        self._init_OR(mode='default') #initialize base on self.OR 
+        self.p_OR = p_OR
+        df = pd.read_excel(self.p_OR)
+        #_set_params enables alteration of OR values --> uses self.p_OR
+        self._set_params(df)
         
         self.nums_mrs = pd.read_excel(p_nums_mrs)
         self.dataset = dataset
@@ -81,7 +81,7 @@ class ControlPatientGeneration(object):
                 self.dct_OR[k] = v['OR']
             elif mode=='probabilistic':
                 oddsratio,ci_low,ci_high = v['OR'],v['CI_low'],v['CI_high']
-                self.dct_OR = np.random.lognormal(mean=np.log(oddsratio), 
+                self.dct_OR[k] = np.random.lognormal(mean=np.log(oddsratio), 
                                     sigma=abs(np.log(ci_low)-np.log(ci_high))/3.92)
             
             if self.verbal:
@@ -101,11 +101,27 @@ class ControlPatientGeneration(object):
 
         return mrs_noevt, mrs_evt
 
-
     def _probabilistic_resample(self):
         #self._init_ppy(probabilistic=True) # NO RESAMPLING of p_restroke
         self._init_OR(mode='probabilistic')
-    
+
+    def _get_params(self,current=True):
+        #if current returns the current variables
+        #else the original df is loaded --> used for PSA/OneWay
+        if not current:
+            df = pd.read_excel(self.p_OR)
+            self._set_params(df)
+        #returns values used for simulations
+        out = pd.DataFrame(self.OR).T #converts back to input df
+        out['object'] = 'CPG'
+        return out
+
+    def _set_params(self,df):
+        #sets values used for simulation
+        df.index = df.varname
+        self.OR = df.to_dict(orient='index')
+        self._init_OR(mode='default') #initialize base on self.OR 
+
     def __call__(self,pt_dct):
         #pt_dct represents 
         # pt_dct has key= 'mrs' or 'noEVT'/'noEVT*core_volume'
@@ -131,7 +147,7 @@ class ControlPatientGeneration(object):
         
 
         return mrs_evt, mrs_noevt
-        
+
 class Simulate(object):
     """
     Inputs:
@@ -155,12 +171,10 @@ class Simulate(object):
                  mrs01=True, #takes mrs 0 and 1 together
                  verbal=False
                 ):
-        
+        #if verbal=True prints stuff for debugging
         self.verbal = verbal
 
         self.CPG = CPG
-        self.CPG.verbal = self.verbal
-
         self.M = M
         self.RS = RS
         self.C = C
@@ -169,6 +183,14 @@ class Simulate(object):
         
         self.start_year=start_year
         self.years_to_simulate = years_to_simulate
+
+        if self.verbal:
+            self.CPG.verbal = self.verbal
+            self.M.verbal = self.verbal
+            self.RS.verbal = self.verbal
+            self.C.verbal = self.verbal
+            self.Q.verbal = self.verbal
+
     
     def _probabilistic_resample(self):
         # resample all parameters for probabilistic sensitivity analyses (PSA)
@@ -188,15 +210,15 @@ class Simulate(object):
       
 
         # IVT costs should allways be included (if IVT is given)
-        C_treatment = self.C.costs_IVT*pt_dct['IVT']
+        C_ivt = self.C.costs_IVT*pt_dct['IVT']
         
         #CTP arm withouth evt
-        C_treatment_CTP_noevt = C_treatment + self.C.costs_CTP
+        C_treatment_CTP_noevt = C_ivt + self.C.costs_CTP
         cur_mrs_CTP_noevt = cur_mrs_noevt.copy()
         costs_ctp_noevt = self.C(cur_mrs_CTP_noevt,1)
         qalys_ctp_noevt = self.Q(cur_mrs_CTP_noevt,1)
         row_ctp_noevt = [ID,'noEVT','CTP',self.start_year,1,
-                           *list(cur_mrs_noevt), 
+                           *list(cur_mrs_CTP_noevt), 
                             C_treatment_CTP_noevt,
                            *list(costs_ctp_noevt),
                            *list(qalys_ctp_noevt),
@@ -208,7 +230,7 @@ class Simulate(object):
         costs_ctp_evt = self.C(cur_mrs_CTP_evt,1)
         qalys_ctp_evt = self.Q(cur_mrs_CTP_evt,1)
         row_ctp_evt = [ID,'EVT','CTP',self.start_year,1,
-                       *list(cur_mrs_evt), 
+                       *list(cur_mrs_CTP_evt), 
                         C_treatment_CTP_evt,
                        *list(costs_ctp_evt),
                        *list(qalys_ctp_evt),
@@ -216,30 +238,39 @@ class Simulate(object):
         
 
         #if no CTP used all are treated
-        C_treatment_noCTP = C_treatment + self.C.costs_EVT
-        cur_mrs_noCTP = cur_mrs_evt.copy()  
-        costs_noctp = self.C(cur_mrs_noCTP,1)
-        qalys_noctp = self.Q(cur_mrs_noCTP,1)
+        C_treatment_noCTP_evt = C_ivt + self.C.costs_EVT
+        cur_mrs_noCTP_evt = cur_mrs_evt.copy()  
+        costs_noctp = self.C(cur_mrs_noCTP_evt,1)
+        qalys_noctp = self.Q(cur_mrs_noCTP_evt,1)
 
-        row_noctp = [ID,'EVT','noCTP',self.start_year,1,
-                   *list(cur_mrs_evt),
-                   C_treatment_noCTP,
+        row_noctp_evt = [ID,'EVT','noCTP',self.start_year,1,
+                   *list(cur_mrs_noCTP_evt),
+                   C_treatment_noCTP_evt,
                    *list(costs_noctp),
                    *list(qalys_noctp)
                     ]
 
-        out = [row_ctp_evt, row_ctp_noevt, row_noctp]
-        if self.verbal:
-            print('90d mRS|CTP&EVT:',row_ctp_evt)
-            print('90d mRS|CTP&noEVT:',row_ctp_noevt)
-            print('90d mRS|noCTP:',row_noctp)
+        #if no CTP used all are treated --> add a miss rate for M2-3
+        C_treatment_noCTP_noevt = C_ivt
+        cur_mrs_noCTP_noevt = cur_mrs_noevt.copy()  
+        costs_noctp = self.C(cur_mrs_noCTP_noevt,1)
+        qalys_noctp = self.Q(cur_mrs_noCTP_noevt,1)
 
-        return cur_mrs_CTP_evt, cur_mrs_CTP_noevt, cur_mrs_noCTP, out
+        row_noctp_noevt = [ID,'noEVT','noCTP',self.start_year,1,
+                   *list(cur_mrs_noCTP_noevt),
+                   C_treatment_noCTP_noevt,
+                   *list(costs_noctp),
+                   *list(qalys_noctp)
+                    ]
+
+        out = [row_ctp_evt, row_ctp_noevt, row_noctp_evt, row_noctp_noevt]
+        return cur_mrs_CTP_evt, cur_mrs_CTP_noevt, cur_mrs_noCTP_evt, cur_mrs_noCTP_noevt, out
     
     def _simulate_year(self,cur_mrs,ID,
                        treatment,ctp_noctp,
                        cur_year,yearno,
                        sex,cur_age):
+        
         # simulate mortality and stroke recurrence of ctp arm
         cur_mrs, __ = self.M(sex,cur_year,cur_age,cur_mrs)
         cur_mrs, __ = self.RS(yearno,cur_age,cur_mrs)
@@ -260,7 +291,9 @@ class Simulate(object):
                             out,
                             cur_mrs_CTP_evt,
                             cur_mrs_CTP_noevt, 
-                            cur_mrs_noCTP):
+                            cur_mrs_noCTP_evt,
+                            cur_mrs_noCTP_noevt,
+                           ):
         
         #LT sims start after the first year (all should have +1)
         cur_year = self.start_year+1
@@ -275,8 +308,6 @@ class Simulate(object):
         
         #simulate per year
         for yearno in range(yearno,self.years_to_simulate+1):         
-            if self.verbal:
-                print('year, yearno, age:',cur_year, yearno,cur_age)
             #simulate mRS|CTP&EVT
             cur_mrs_CTP_evt, row = self._simulate_year(
                                                     cur_mrs_CTP_evt,
@@ -284,8 +315,7 @@ class Simulate(object):
                                                     cur_year,yearno,
                                                     sex,cur_age)
             out.append(row)
-            if self.verbal:
-                print('mRS|CTP&EVT:',row)
+
             #simulate mRS|CTP&noEVT
             cur_mrs_CTP_noevt, row = self._simulate_year(
                                                     cur_mrs_CTP_noevt,
@@ -293,20 +323,30 @@ class Simulate(object):
                                                     cur_year,yearno,
                                                     sex,cur_age)         
             out.append(row)
-            if self.verbal:
-                print('mRS|CTP&noEVT:',row)
-            #simulate mRS|noCTP=EVT
-            cur_mrs_noCTP, row = self._simulate_year(
-                                                    cur_mrs_noCTP,
+
+            #simulate mRS|noCTP&EVT
+            cur_mrs_noCTP_evt, row = self._simulate_year(
+                                                    cur_mrs_noCTP_evt,
                                                     ID,'EVT','noCTP',
                                                     cur_year,yearno,
                                                     sex,cur_age)         
             out.append(row)
-            if self.verbal:
-                print('mRS|CTP:',row)
+            #simulate mRS|noCTP&noEVT
+            cur_mrs_noCTP_noevt, row = self._simulate_year(
+                                                    cur_mrs_noCTP_noevt,
+                                                    ID,'noEVT','noCTP',
+                                                    cur_year,yearno,
+                                                    sex,cur_age)         
+            out.append(row)
             #mortality is calculated with that start age per year
             cur_age+=1
             cur_year+=1
+            if self.verbal:
+                print('year {} mRS CTP+EVT:'.format(yearno),cur_mrs_CTP_evt)
+                print('year {} mRS CTP+noEVT:'.format(yearno),cur_mrs_CTP_noevt)
+                print('year {} mRS noCTP+EVT:'.format(yearno),cur_mrs_noCTP_evt)
+                print('year {} mRS noCTP+noEVT:'.format(yearno),cur_mrs_noCTP_noevt)
+
         return out
         
     def __call__(self,pt_dct):
@@ -314,13 +354,21 @@ class Simulate(object):
         #sim_control can be set to false since control arm is only required once
         
         #simulate 90-day outcome (as 1-year outcome in costs)
-        cur_mrs_CTP_evt, cur_mrs_CTP_noevt, cur_mrs_noCTP, out = self._90d_both_arms(pt_dct)
-            
+        cur_mrs_CTP_evt, cur_mrs_CTP_noevt, \
+        cur_mrs_noCTP_evt, cur_mrs_noCTP_noevt, out = self._90d_both_arms(pt_dct)
+        
+        if self.verbal:
+            print('mRS 90d CTP+EVT:',cur_mrs_CTP_evt)
+            print('mRS 90d CTP+noEVT:',cur_mrs_CTP_noevt)
+            print('mRS 90d noCTP+EVT:',cur_mrs_noCTP_evt)
+            print('mRS 90d noCTP+noEVT:',cur_mrs_noCTP_noevt)
+
         #perform long term simulation
         out = self._simulate_long_term(pt_dct, out,
                                         cur_mrs_CTP_evt,
                                         cur_mrs_CTP_noevt, 
-                                        cur_mrs_noCTP)
+                                        cur_mrs_noCTP_evt,
+                                        cur_mrs_noCTP_noevt)
         #store all data
         cols = [
                 'ID','treatment','ctp','year','yearno',
@@ -328,11 +376,12 @@ class Simulate(object):
                 'treat_Costs', *['Costs'+str(i) for i in range(1,7)],
                 *['QALYs'+str(i) for i in range(1,7)],
                 ]
+        
         df_out = pd.DataFrame(out,columns=cols)
         df_out['TotCosts'] = df_out[[c for c in df_out if 'Costs' in c]].sum(axis=1)
         df_out['TotQALYs'] = df_out[[c for c in df_out if 'QALYs' in c]].sum(axis=1)
-        return df_out 
-    
+        return df_out
+
 
 
 

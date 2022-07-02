@@ -16,8 +16,11 @@ class RecurrentStroke(object):
     def __init__(self, 
                  file_p_HR,
                  p_mrs_postrestroke = \
-                 np.array([11/233, 21/233,18/233,22/233,6/233]) #without mortality
+                 np.array([11/233, 21/233,18/233,22/233,6/233]), #without mortality
+                 verbal=False
                 ):
+
+        self.verbal = verbal
         #Probability per year post stroke and HR from file
         self.file_p_HR = file_p_HR
         self.ppy = pd.read_excel(self.file_p_HR,'prob_per_year')
@@ -116,7 +119,11 @@ class RecurrentStroke(object):
             out = mrs_dist
         else:
             out = None
-            
+        
+        if self.verbal:
+            print('Hazard rate:',HR)
+            print('Prob restroke:',p_restroke)
+
         return out, p_restroke
 
 

@@ -6,18 +6,6 @@ import os,sys, time,subprocess, glob, timeit,json
 from numba import jit, njit, prange
 from tqdm import tqdm
 
-def get_patient_dct(df,ID):
-    pt = df.loc[ID]
-    pt_dct = {}
-    pt_dct['ID'] = pt['IDs']
-    pt_dct['mrs'] = pt['mrs_def']
-    pt_dct['noEVT'] = 1
-    pt_dct['noEVT*core_vol'] = int(pt['core_vol'])
-    pt_dct['IVT'] = pt['ivt_given']
-    pt_dct['age'] = pt['r_age']
-    pt_dct['sex'] = pt['r_sex']
-    return pt_dct
-
 def sum_mrs01(mrs_dist):
     mrs_dist[1] = mrs_dist[0]+mrs_dist[1]
     return mrs_dist[1:]
