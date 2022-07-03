@@ -113,15 +113,19 @@ def subgroup_psa(df,
     CEA_res = pd.concat(CEA_res)
     return CEA_res
 
-def shift_tx_OR(CPG,shift):
+
+def shift_EVT_OR(CPG,shift):
+    #Used to shift the treatment effect (EVT) odds ratio in original values (1.86)
     #CPG: ControlPatientGeneration class object 
     #shift: OR point shift (from original reported OR)
     cpg_params = CPG._get_params(current=False) #current=False returns original df and shifts the original data
     new_cpg_params = cpg_params.copy()
     new_cpg_params.loc['noEVT',['OR','CI_low','CI_high']] = 1/(1/cpg_params.loc['noEVT',['OR','CI_low','CI_high']]+shift)
     CPG._set_params(new_cpg_params)
+    return CPG
 
-def shift_tx_core_volume_OR(CPG,shift):
+def shift_EVT_core_volume_OR(CPG,shift):
+    #used to shift EVT effect modification value by core_volume in original value (0.98)
     #CPG: ControlPatientGeneration class object 
     #shift: OR point shift (from original reported OR)
     cpg_params = CPG._get_params(current=False) #current=False returns original df and shifts the original data
@@ -133,3 +137,68 @@ def shift_tx_core_volume_OR(CPG,shift):
     params = 1/np.exp(np.log(np.exp(np.log(params)*10)+shift)/10)
     new_cpg_params.loc['noEVT*core_vol',['OR','CI_low','CI_high']] = params
     CPG._set_params(new_cpg_params)
+    return CPG
+
+#PSA for a set of possible OR shifts
+def OR_shift_psa(df,
+                 OR_evt_shifts,
+                 OR_evt_corevol_shifts,
+                 Sim,
+                 N_resamples,
+                 N_patients_per_cohort,
+                 thresholds=np.arange(0,151,10),
+                 seed=21):
+    #special type of sensitivity analyses:
+    # the input 90d ORs are altered
+    
+    #set all seeds!!
+    bl_dct = df.to_dict(orient='index')
+    for evt_shift in OR_evt_shifts:
+        for evt_corevol_shift in OR_evt_corevol_shifts:
+            Sim.CPG = shift_EVT_OR(Sim.CPG,evt_shift)
+            Sim.CPG = shift_EVT_core_volume_OR(Sim.CPG,evt_corevol_shift)
+            totals_res,extend_res = probabilistic_simulation(Sim,tmp,
+                                                             N_resamples,N_patients_per_cohort)
+            outs, aggrs = probabilistic_cohort_outcomes(totals_res,
+                                                        bl_dct,
+                                                        costs_per_ctp=0, #should only be used for M2 miss sims
+                                                        multiply_ctp_costs = 0, #should only be used for M2 miss sims
+                                                        miss_percentage = 0, #should only be used for M2 miss sims
+                                                        WTP=WTP)
+            aggrs['OR_evt_shift'] = evt_shift
+            aggrs['OR_evt_corevol_shift'] = evt_corevol_shift
+            
+            CEA_res.append(aggrs)
+    CEA_res = pd.concat(CEA_res)
+    return CEA_res
+
+def M2_miss_psa(df,
+                 Sim,
+                 N_resamples, #10,000 in protocol --> use 1,000
+                 N_patients_per_cohort, #100 pt in protocol
+                 screening_multiplier, 
+                 miss_percentage=[0,.1,.2,.3,.4,.5],
+                 WTP=80000,
+                 seed=21):
+    #function runs PSA simulations
+    
+    #set all seeds!!
+    #screening_multiplier: multiplied with CTP costs to 
+    #represent number needed to image before a 'missed' M2 
+    #is detected --> thus population costs are in the analysis
+    
+    bl_dct = df.to_dict(orient='index')
+
+    totals_res,extend_res = probabilistic_simulation(Sim,
+                                                     df[df['bl_occloc']=='M2'],#only simulate for M2
+                                                     N_resamples,
+                                                     N_patients_per_cohort)
+    
+    outs, aggrs = probabilistic_cohort_outcomes(totals_res, 
+                                                bl_dct,
+                                                thresholds=[2000], #nobody should be excluded
+                                                costs_per_ctp=Sim.C.costs_CTP,
+                                                multiply_ctp_costs = screening_multiplier,
+                                                miss_percentage = miss_percentage,
+                                                WTP = WTP)
+    return outs, aggrs

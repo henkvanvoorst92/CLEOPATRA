@@ -126,10 +126,10 @@ def ICER_plot(aggrs,name, min_x=-.15,max_x =.15):
     plt.show()
 
     
-folder = 'EVT_effect'
-d = os.path.join(root_sav,'PSA',folder)
-CEA_res = pd.read_pickle(os.path.join(d,'probabilistic_ICER_results.pic'))
-CEA_res.subgroup = [s[:15 ]for s in CEA_res.subgroup]
-for sg in CEA_res.subgroup.unique():
-    tmp = CEA_res[CEA_res==sg]
-    plot_res(aggrs,sg)
+# folder = 'EVT_effect'
+# d = os.path.join(root_sav,'PSA',folder)
+# CEA_res = pd.read_pickle(os.path.join(d,'probabilistic_ICER_results.pic'))
+# CEA_res.subgroup = [s[:15 ]for s in CEA_res.subgroup]
+# for sg in CEA_res.subgroup.unique():
+#     tmp = CEA_res[CEA_res==sg]
+#     plot_res(aggrs,sg)

@@ -143,8 +143,6 @@ class ControlPatientGeneration(object):
             mrs_evt = np.array([0,0,0,0,0,1])
 
         #generate new mRS distributions
-        
-        
 
         return mrs_evt, mrs_noevt
 

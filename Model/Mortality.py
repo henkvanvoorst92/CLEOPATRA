@@ -21,19 +21,21 @@ class Mortality(object):
 
         self.verbal = verbal
 
-        #mortality probabilities
+        #mortality probabilities by sex, age, and year
         mort_male = pd.read_excel(p_mort_file, 'male').iloc[:,:30]
         mort_male.index = mort_male['age']
         mort_female = pd.read_excel(p_mort_file, 'female').iloc[:,:30]
         mort_female.index = mort_female['age']
-
+        #we do NOT simulate with mortality rate
         self.dct_mort = {'M':mort_male[years].to_dict(),
                         'F':mort_female[years].to_dict()}
         
         # HR from data by Hong et al: https://pubmed.ncbi.nlm.nih.gov/20133917/
         self.HR_mrs_deterministic = HR_mrs
+        self.HR_mrs_deterministic_org = HR_mrs.copy()
         self.delta_HR_mrs = delta_HR_mrs
-        self._init_HR()
+        self.delta_HR_mrs_org = delta_HR_mrs.copy()
+        self._init_HR(mode='default')
 
     def _init_HR(self, mode='default'):
         if mode=='default':
@@ -52,7 +54,29 @@ class Mortality(object):
 
     def _probabilistic_resample(self):
         self._init_HR(mode='probabilistic')
-        
+    
+    def _get_params(self,current=True):
+        #if current returns the current variables
+        #else the original df is loaded --> used for PSA/OneWay
+        if not current:
+
+            #simulate only with HR
+            self.HR_mrs_deterministic = self.HR_mrs_deterministic_org.copy()
+            self.delta_HR_mrs = self.delta_HR_mrs_org.copy()
+        #returns values used for simulations --> todo
+        # out = pd.DataFrame(data=[self.HR_mrs_deterministic,self.delta_HR_mrs],
+        #                     ).T
+        # out['object'] = 'M'
+        return out
+
+    def _set_params(self,df):
+        #sets values used for simulation
+        # df.index = df.varname
+        # self.OR = df.to_dict(orient='index')
+        # self._init_OR(mode='default') #initialize base on self.OR 
+
+
+
     def __call__(self,sex,year,age, mrs_dist=None):
         # input mRS distribution (mrs_dist) should always sum up to 1
 
