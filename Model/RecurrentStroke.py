@@ -17,9 +17,11 @@ class RecurrentStroke(object):
                  file_p_HR,
                  p_mrs_postrestroke = \
                  np.array([11/233, 21/233,18/233,22/233,6/233]), #without mortality
-                 verbal=False
+                 verbal=False,
+                 seed=21
                 ):
-
+        np.random.seed(seed)
+        
         self.verbal = verbal
         #Probability per year post stroke and HR from file
         self.file_p_HR = file_p_HR

@@ -21,7 +21,7 @@ def probabilistic_cohort_outcomes(df_psa,
     #computes the outcomes per core_volume threshold per cohort average
     outs, aggrs = [],[]
     for simno in df_psa['simno'].unique():
-        df_res = totals_res[df_psa['simno']==simno]
+        df_res = df_psa[df_psa['simno']==simno]
         df_res['core_vol'] = [bl_dct[ID]['core_vol'] for ID in df_res.index]
         df_res = df_res.reset_index(drop=True)
         #compute cohort results separately
@@ -98,32 +98,6 @@ def cohort_outcome(df_res,
     out = pd.concat(out,axis=1)
     aggr = pd.concat(aggrs,axis=1).T
     return out, aggr
-
-
-def ICER_plot(aggrs,name, min_x=-.15,max_x =.15):
-    d1 = aggrs[(aggrs.threshold>=50)&(aggrs.threshold<70)]
-    d1['group'] = '>50mL'
-    d2 = aggrs[(aggrs.threshold>=70)&(aggrs.threshold<100)]
-    d2['group'] = '>70mL'
-    d3 = aggrs[aggrs.threshold>=100]
-    d3['group'] = '>100mL'
-    dataplot = pd.concat([d1, d2, d3])
-    dataplot.group.unique()
-    
-    x = np.linspace(min_x, max_x)
-    y_b = np.arange(min_y, max_y,50)
-    y = 80000*x
-    sns.lineplot(x,np.zeros_like(x),color='black',linewidth=1)
-    sns.lineplot(np.zeros_like(y_b),y_b,color='black',linewidth=1,estimator=None)
-    sns.scatterplot(data=dataplot,x='d_qalys',y='d_costs', hue='group')
-    sns.lineplot(x,y,color='black')
-    plt.ylim(min_y, max_y)
-    plt.xlim(min_x, max_x)
-    plt.ylabel('Difference Costs(€) (CTP-noCTP)')
-    plt.xlabel('Difference QALYS (CTP-noCTP)')
-    plt.gcf().subplots_adjust(left=0.15)
-    plt.savefig(os.path.join(root_fig,'ICER_{}.png'.format(name)))
-    plt.show()
 
     
 # folder = 'EVT_effect'

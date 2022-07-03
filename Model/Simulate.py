@@ -6,8 +6,6 @@ import re
 import os
 from Utils.utils import sum_mrs01
 
-
-
 #short term model: 90day outcome for EVT and noEVT arms
 class ControlPatientGeneration(object):
     """

@@ -59,18 +59,19 @@ def simulate_IDs(IDs,df,Simulator, verbal=True):
     return totals_res, extend_res
 
 
-def probabilistic_simulation(S,df,N_resamples,N_patients_per_cohort):
+def probabilistic_simulation(S,df,N_resamples,N_patients_per_cohort,seed=21):
     #S: initialized Simulate class object (contains all the data and methods)
     #df: dataframe with index=ID and columns with patient variables
     #N_resamples: Number of probabilistic resamples to run
     #N_patients_per_cohort: Number of patients per cohort
     #returns: similar to return of simulate_IDs but per N_resmaples iteration
+    np.random.seed(seed)
     tots,exts = [],[]
     for i in tqdm(range(N_resamples)):
         #draw new parameters from initialized distributions
         S._probabilistic_resample()
         #sample a cohort of IDs with replaceemnt
-        smpl = df.sample(N_patients_per_cohort,replace=True).index
+        smpl = df.sample(N_patients_per_cohort,replace=True, random_state=seed).index
         #simulation output
         totals_res, extend_res = simulate_IDs(smpl,df,S,False)
         totals_res['simno'] = i
@@ -92,16 +93,19 @@ def subgroup_psa(df,
                  costs_per_ctp=0,
                  multiply_ctp_costs=0,
                  miss_percentage=[0],
+                 WTP=80000,
                  seed=21):
     #performs PSA for each subgroup
     #just splits each input cohort
-    
+    np.random.seed(seed)
     #set all seeds!!
     bl_dct = df.to_dict(orient='index')
+    CEA_res = []
     for sgroup in df[col_subgroup].unique():
         tmp = df[df[col_subgroup]==sgroup]
         totals_res,extend_res = probabilistic_simulation(Sim,tmp,
                                                         N_resamples,N_patients_per_cohort)
+
         outs, aggrs = probabilistic_cohort_outcomes(totals_res,
                                                     bl_dct,
                                                     costs_per_ctp=costs_per_ctp,
@@ -147,58 +151,82 @@ def OR_shift_psa(df,
                  N_resamples,
                  N_patients_per_cohort,
                  thresholds=np.arange(0,151,10),
+                 WTP=80000,
                  seed=21):
     #special type of sensitivity analyses:
     # the input 90d ORs are altered
-    
+    np.random.seed(seed)
+
     #set all seeds!!
     bl_dct = df.to_dict(orient='index')
+    res_aggr = []
+    res_extended = []
     for evt_shift in OR_evt_shifts:
         for evt_corevol_shift in OR_evt_corevol_shifts:
             Sim.CPG = shift_EVT_OR(Sim.CPG,evt_shift)
             Sim.CPG = shift_EVT_core_volume_OR(Sim.CPG,evt_corevol_shift)
-            totals_res,extend_res = probabilistic_simulation(Sim,tmp,
+            totals_res,extend_res = probabilistic_simulation(Sim,df,
                                                              N_resamples,N_patients_per_cohort)
             outs, aggrs = probabilistic_cohort_outcomes(totals_res,
                                                         bl_dct,
                                                         costs_per_ctp=0, #should only be used for M2 miss sims
                                                         multiply_ctp_costs = 0, #should only be used for M2 miss sims
-                                                        miss_percentage = 0, #should only be used for M2 miss sims
+                                                        miss_percentage = [0], #should only be used for M2 miss sims
                                                         WTP=WTP)
             aggrs['OR_evt_shift'] = evt_shift
             aggrs['OR_evt_corevol_shift'] = evt_corevol_shift
+
+            outs['OR_evt_shift'] = evt_shift
+            outs['OR_evt_corevol_shift'] = evt_corevol_shift
             
-            CEA_res.append(aggrs)
-    CEA_res = pd.concat(CEA_res)
-    return CEA_res
+            res_aggr.append(aggrs)
+            res_extended.append(outs)
+
+    res_aggr = pd.concat(res_aggr)
+    res_extended = pd.concat(res_extended)
+    return res_extended, res_aggr
 
 def M2_miss_psa(df,
                  Sim,
                  N_resamples, #10,000 in protocol --> use 1,000
                  N_patients_per_cohort, #100 pt in protocol
-                 screening_multiplier, 
+                 screening_multipliers, 
+                 OR_evt_shift=0, #it is likely EVT effect is lower in M2
                  miss_percentage=[0,.1,.2,.3,.4,.5],
                  WTP=80000,
                  seed=21):
+    np.random.seed(seed)
     #function runs PSA simulations
+    
+    #EVT initial shift
+    if OR_evt_shift!=0:
+        Sim.CPG = shift_EVT_OR(Sim.CPG,OR_evt_shift)
     
     #set all seeds!!
     #screening_multiplier: multiplied with CTP costs to 
     #represent number needed to image before a 'missed' M2 
     #is detected --> thus population costs are in the analysis
-    
     bl_dct = df.to_dict(orient='index')
-
+    
+    
     totals_res,extend_res = probabilistic_simulation(Sim,
-                                                     df[df['bl_occloc']=='M2'],#only simulate for M2
+                                                     df[(df['bl_occloc']=='M2')|(df['bl_occloc']=='M3')],#only simulate for M2
                                                      N_resamples,
                                                      N_patients_per_cohort)
-    
-    outs, aggrs = probabilistic_cohort_outcomes(totals_res, 
-                                                bl_dct,
-                                                thresholds=[2000], #nobody should be excluded
-                                                costs_per_ctp=Sim.C.costs_CTP,
-                                                multiply_ctp_costs = screening_multiplier,
-                                                miss_percentage = miss_percentage,
-                                                WTP = WTP)
-    return outs, aggrs
+    ext_out, aggr_out = [],[]
+    for NNI_multiplier in screening_multipliers:
+        outs, aggrs = probabilistic_cohort_outcomes(totals_res, 
+                                                    bl_dct,
+                                                    thresholds=[2000], #nobody should be excluded
+                                                    costs_per_ctp=Sim.C.costs_CTP,
+                                                    multiply_ctp_costs = NNI_multiplier,
+                                                    miss_percentage = miss_percentage,
+                                                    WTP = WTP)
+        outs['NNI_multiplier'] = NNI_multiplier
+        aggrs['NNI_multiplier'] = NNI_multiplier
+        ext_out.append(outs)
+        aggr_out.append(aggrs)
+
+    res_aggr = pd.concat(aggr_out)
+    res_extended = pd.concat(ext_out)
+    return res_extended, res_aggr 
