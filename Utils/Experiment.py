@@ -70,12 +70,18 @@ def probabilistic_simulation(S,df,N_resamples,N_patients_per_cohort,seed=21):
     for i in tqdm(range(N_resamples)):
         #draw new parameters from initialized distributions
         S._probabilistic_resample()
+        #print(S.CPG.dct_OR)
         #sample a cohort of IDs with replaceemnt
-        smpl = df.sample(N_patients_per_cohort,replace=True, random_state=seed).index
+        smpl = df.sample(N_patients_per_cohort,replace=True, random_state=i).index
         #simulation output
         totals_res, extend_res = simulate_IDs(smpl,df,S,False)
         totals_res['simno'] = i
+        totals_res['OR_noEVT'] = S.CPG.dct_OR['noEVT']
+        totals_res['OR_noEVT_corevol'] = S.CPG.dct_OR['noEVT*core_vol']
         extend_res['simno'] = i
+        extend_res['OR_noEVT'] = S.CPG.dct_OR['noEVT']
+        extend_res['OR_noEVT_corevol'] = S.CPG.dct_OR['noEVT*core_vol']
+
         tots.append(totals_res)
         exts.append(extend_res)
     
@@ -104,7 +110,8 @@ def subgroup_psa(df,
     for sgroup in df[col_subgroup].unique():
         tmp = df[df[col_subgroup]==sgroup]
         totals_res,extend_res = probabilistic_simulation(Sim,tmp,
-                                                        N_resamples,N_patients_per_cohort)
+                                                        N_resamples,
+                                                        N_patients_per_cohort)
 
         outs, aggrs = probabilistic_cohort_outcomes(totals_res,
                                                     bl_dct,
@@ -117,29 +124,49 @@ def subgroup_psa(df,
     CEA_res = pd.concat(CEA_res)
     return CEA_res
 
+#These two functions first reset default params --> 
+#if used consecutively only the last change is used
+# def shift_EVT_OR(CPG,shift):
+#     #Used to shift the treatment effect (EVT) odds ratio in original values (1.86)
+#     #CPG: ControlPatientGeneration class object 
+#     #shift: OR point shift (from original reported OR)
+#     cpg_params = CPG._get_params(current=False) #current=False returns original df and shifts the original data
+#     new_cpg_params = cpg_params.copy()
+#     params = 1/(1/new_cpg_params.loc['noEVT',['OR','CI_low','CI_high']]+shift).astype('float')
+#     new_cpg_params.loc['noEVT',['OR','CI_low','CI_high']] = params
+#     CPG._set_params(new_cpg_params)
+#     return CPG
 
-def shift_EVT_OR(CPG,shift):
-    #Used to shift the treatment effect (EVT) odds ratio in original values (1.86)
-    #CPG: ControlPatientGeneration class object 
-    #shift: OR point shift (from original reported OR)
-    cpg_params = CPG._get_params(current=False) #current=False returns original df and shifts the original data
-    new_cpg_params = cpg_params.copy()
-    new_cpg_params.loc['noEVT',['OR','CI_low','CI_high']] = 1/(1/cpg_params.loc['noEVT',['OR','CI_low','CI_high']]+shift)
-    CPG._set_params(new_cpg_params)
-    return CPG
-
-def shift_EVT_core_volume_OR(CPG,shift):
-    #used to shift EVT effect modification value by core_volume in original value (0.98)
-    #CPG: ControlPatientGeneration class object 
-    #shift: OR point shift (from original reported OR)
-    cpg_params = CPG._get_params(current=False) #current=False returns original df and shifts the original data
-    new_cpg_params = cpg_params.copy()
+# def shift_EVT_core_volume_OR(CPG,shift):
+#     #used to shift EVT effect modification value by core_volume in original value (0.98)
+#     #CPG: ControlPatientGeneration class object 
+#     #shift: OR point shift (from original reported OR)
+#     cpg_params = CPG._get_params(current=False) #current=False returns original df and shifts the original data
+#     new_cpg_params = cpg_params.copy()
     
-    #extract OR for effect modification (EVT*core_vol; input considers noEVT)
-    params = (1/new_cpg_params.loc['noEVT*core_vol',['OR','CI_low','CI_high']]).astype('float')
-    #return to per 10 mL (the input OR), add shift, return to per mL
-    params = 1/np.exp(np.log(np.exp(np.log(params)*10)+shift)/10)
-    new_cpg_params.loc['noEVT*core_vol',['OR','CI_low','CI_high']] = params
+#     #extract OR for effect modification (EVT*core_vol; input considers noEVT)
+#     params = (1/new_cpg_params.loc['noEVT*core_vol',['OR','CI_low','CI_high']]).astype('float')
+#     #return to per 10 mL (the input OR), add shift, return to per mL
+#     params = 1/np.exp(np.log(np.exp(np.log(params)*10)+shift)/10)
+#     new_cpg_params.loc['noEVT*core_vol',['OR','CI_low','CI_high']] = params
+#     CPG._set_params(new_cpg_params)
+#     return CPG
+
+#this funciton shift ORs in one go
+def shift_ORs(CPG, shift_dct):
+    cpg_params = CPG._get_params(current=False)
+    new_cpg_params = cpg_params.copy()
+    for variable,shift in shift_dct.items():
+        if variable=='EVT':
+            params = 1/(1/new_cpg_params.loc['noEVT',['OR','CI_low','CI_high']]+shift).astype('float')
+            new_cpg_params.loc['noEVT',['OR','CI_low','CI_high']] = params
+        elif variable=='EVT*core_vol':
+            params = (1/new_cpg_params.loc['noEVT*core_vol',['OR','CI_low','CI_high']]).astype('float')
+            #return to per 10 mL (the input OR), add shift, return to per mL
+            params = 1/np.exp(np.log(np.exp(np.log(params)*10)+shift)/10)
+            new_cpg_params.loc['noEVT*core_vol',['OR','CI_low','CI_high']] = params
+        else:
+            print('Unkown variable and shift:',variable,shift)
     CPG._set_params(new_cpg_params)
     return CPG
 
@@ -159,20 +186,24 @@ def OR_shift_psa(df,
 
     #set all seeds!!
     bl_dct = df.to_dict(orient='index')
-    res_aggr = []
-    res_extended = []
+    res_aggr, res_extended = [],[] #cea res
+
+    sim_tot, sim_ext = [], [] #sim res
+    fullres = []
     for evt_shift in OR_evt_shifts:
         for evt_corevol_shift in OR_evt_corevol_shifts:
-            Sim.CPG = shift_EVT_OR(Sim.CPG,evt_shift)
-            Sim.CPG = shift_EVT_core_volume_OR(Sim.CPG,evt_corevol_shift)
-            totals_res,extend_res = probabilistic_simulation(Sim,df,
-                                                             N_resamples,N_patients_per_cohort)
-            outs, aggrs = probabilistic_cohort_outcomes(totals_res,
+            Sim.CPG = shift_ORs(Sim.CPG,shift_dct={'EVT':evt_shift, 'EVT*core_vol':evt_corevol_shift})
+            totals_res,extend_res = probabilistic_simulation(Sim,
+                                                             df,
+                                                             N_resamples,
+                                                             N_patients_per_cohort)
+            outs, aggrs, fr = probabilistic_cohort_outcomes(totals_res,
                                                         bl_dct,
                                                         costs_per_ctp=0, #should only be used for M2 miss sims
                                                         multiply_ctp_costs = 0, #should only be used for M2 miss sims
                                                         miss_percentage = [0], #should only be used for M2 miss sims
                                                         WTP=WTP)
+
             aggrs['OR_evt_shift'] = evt_shift
             aggrs['OR_evt_corevol_shift'] = evt_corevol_shift
 
@@ -182,9 +213,21 @@ def OR_shift_psa(df,
             res_aggr.append(aggrs)
             res_extended.append(outs)
 
+            totals_res['OR_evt_shift'] = evt_shift
+            totals_res['OR_evt_corevol_shift'] = evt_corevol_shift
+
+            extend_res['OR_evt_shift'] = evt_shift
+            extend_res['OR_evt_corevol_shift'] = evt_corevol_shift
+
+            sim_tot.append(totals_res)
+            sim_ext.append(extend_res)
+
     res_aggr = pd.concat(res_aggr)
     res_extended = pd.concat(res_extended)
-    return res_extended, res_aggr
+
+    sim_tot = pd.concat(sim_tot)
+    sim_ext = pd.concat(sim_ext)
+    return res_extended, res_aggr, sim_ext, sim_tot
 
 def M2_miss_psa(df,
                  Sim,

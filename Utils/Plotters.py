@@ -5,9 +5,7 @@ import pandas as pd
 import os,sys 
 from tqdm import tqdm
 
-def ICER_plot(aggrs,root_fig,name, min_x=-.15,max_x =.15, min_y=-12000, max_y=12000):
-    if not os.path.exists(root_fig):
-        os.makedirs(root_fig)
+def ICER_plot(aggrs, name, root_fig=None, min_x=-.15,max_x =.15, min_y=-12000, max_y=12000):
 
     d1 = aggrs[(aggrs.threshold>=50)&(aggrs.threshold<70)]
     d1['group'] = '>50mL'
@@ -30,7 +28,10 @@ def ICER_plot(aggrs,root_fig,name, min_x=-.15,max_x =.15, min_y=-12000, max_y=12
     plt.ylabel('Difference Costs(€) (CTP-noCTP)')
     plt.xlabel('Difference QALYS (CTP-noCTP)')
     plt.gcf().subplots_adjust(left=0.15)
-    plt.savefig(os.path.join(root_fig,'ICER_{}.tiff'.format(name)),dpi=300)
+    if root_fig is not None:  
+        if not os.path.exists(root_fig):
+            os.makedirs(root_fig)
+        plt.savefig(os.path.join(root_fig,'ICER_{}.tiff'.format(name)),dpi=300)
     plt.show()
 
 def plot_outcome_per_threshold(aggrs,

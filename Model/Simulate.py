@@ -20,6 +20,7 @@ class ControlPatientGeneration(object):
                  p_OR, #excel file with OR and dist for EVT and EVT*core_vol
                  p_nums_mrs, #excel file with mrs column and distribution for EVT/noEVT arms 
                  dataset='mrclean', #alternative is hermes data (not reccomended)
+                 fix_certainty=True,
                  verbal=False
                  ):
         
@@ -29,12 +30,15 @@ class ControlPatientGeneration(object):
         self.p_OR = p_OR
         df = pd.read_excel(self.p_OR)
         #_set_params enables alteration of OR values --> uses self.p_OR
-        self._set_params(df)
+        self._set_params(df) #sets self.OR --> default param dict with low-high CI
         
         self.nums_mrs = pd.read_excel(p_nums_mrs)
         self.dataset = dataset
         #total inclusions for each arm
         self.n_tot_evt = self.nums_mrs.sum()['evt_'+self.dataset]
+        self.fix_certainty = fix_certainty #if True, uses mRS<=2 count for p_mrs_noevt computation
+        #else per threshold counts are used --> more wider distributions for lower (favorable) mRS
+
         #self.n_tot_noevt = nums_mrs.sum()['noevt_'+self.dataset] #not required
               
     def _combined_OR(self,pt_dct):
@@ -51,7 +55,9 @@ class ControlPatientGeneration(object):
     
     def _init_odds_good_mrs_evt(self, mrs):
         #step 2 of the supplementary methods
-        #computes the probability of good mrs given evt
+        #computes the odds of good mrs given evt
+        if self.fix_certainty:
+            mrs = 2
         n_goodmrs_evt = self.nums_mrs.loc[:mrs].sum()['evt_'+self.dataset]
         p_good_mrs_evt = n_goodmrs_evt/self.n_tot_evt
         odds_goodmrs_evt = p_good_mrs_evt/(1-p_good_mrs_evt)
@@ -81,9 +87,8 @@ class ControlPatientGeneration(object):
                 oddsratio,ci_low,ci_high = v['OR'],v['CI_low'],v['CI_high']
                 self.dct_OR[k] = np.random.lognormal(mean=np.log(oddsratio), 
                                     sigma=abs(np.log(ci_low)-np.log(ci_high))/3.92)
-            
             if self.verbal:
-                print(k,v['OR'])
+                print(k,v['OR'],self.dct_OR[k] )
 
     def _mrs_distribution(self,p_good_mrs_noevt,mrs, mrs01=True):
 
@@ -131,6 +136,8 @@ class ControlPatientGeneration(object):
             OR_new = self._combined_OR(pt_dct)
             if self.verbal:
                 print('OR new',OR_new)
+                print('OR noEVT:',self.dct_OR['noEVT'])
+                print('OR noEVT*core_vol:',self.dct_OR['noEVT*core_vol'])
             odds_goodmrs_evt = self._init_odds_good_mrs_evt(mrs)
             p_good_mrs_noevt = self._new_p_good_mrs_noevt(OR_new,odds_goodmrs_evt)
             #pm use a gamma distribution with p_good_mrs_control 

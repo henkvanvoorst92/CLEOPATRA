@@ -19,7 +19,7 @@ def probabilistic_cohort_outcomes(df_psa,
     #bl-dct: should contain key=ID value=core_vol
     #WTP is used for NMB calculations
     #computes the outcomes per core_volume threshold per cohort average
-    outs, aggrs = [],[]
+    outs, aggrs, fullres = [],[],[]
     for simno in df_psa['simno'].unique():
         df_res = df_psa[df_psa['simno']==simno]
         df_res['core_vol'] = [bl_dct[ID]['core_vol'] for ID in df_res.index]
@@ -34,11 +34,14 @@ def probabilistic_cohort_outcomes(df_psa,
         aggr['simno'] = simno
         outs.append(out)
         aggrs.append(aggr)
+        fullres.append(df_res)
+
         
     outs = pd.concat(outs)
     aggrs = pd.concat(aggrs)
     aggrs = aggrs.reset_index(drop=True)
-    return outs, aggrs
+    fullres = pd.concat(fullres)
+    return outs, aggrs, fullres
 
 def cohort_outcome(df_res, 
                    thresholds=np.arange(0,151,10),
@@ -58,8 +61,7 @@ def cohort_outcome(df_res,
     for mp in miss_percentage:
         #missed M2 percentage modelling
         add_ctp_costs = (multiply_ctp_costs-1)*costs_per_ctp
-        miss_vec = np.array([1-mp,1-mp,
-                             mp,mp])
+        miss_vec = np.array([1-mp,1-mp,mp,mp])
         for thr in thresholds:
             ##control arm without CTP --> all have EVT
             # optional --> M2s are missed thus noEVT in percentage of pt
@@ -88,6 +90,7 @@ def cohort_outcome(df_res,
             outcome['missed_M2'] = mp
             aggr = outcome[[c for c in outcome if 'ID' not in c]].sum()/len(outcome)
             aggr['ICER'] = aggr['d_costs']/aggr['d_qalys']
+            aggr['n_above_threshold'] = len(noEVT)
             aggr['threshold'] = thr
             aggr['missed_M2'] = mp
 
