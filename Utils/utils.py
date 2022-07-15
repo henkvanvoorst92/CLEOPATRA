@@ -68,3 +68,12 @@ def load_opt_json(root):
     dct['loc_checkpoints'] = root
     return argparse.Namespace(**dct)
 
+def optimal_icv_threshold(df):
+    res = df.groupby(['threshold']).median().reset_index(drop=False)
+    
+    res.index = res['threshold']
+    max_NMB_threshold = res['NMB'].idxmax()
+    print('Optimal NMB threshold:',max_NMB_threshold)
+    print('Optimal NMB:',res['NMB'].max())
+    return df[df['threshold']==max_NMB_threshold]
+

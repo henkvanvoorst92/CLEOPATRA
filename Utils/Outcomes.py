@@ -45,9 +45,9 @@ def probabilistic_cohort_outcomes(df_psa,
 
 def cohort_outcome(df_res, 
                    thresholds=np.arange(0,151,10),
-                   costs_per_ctp=0,
-                   multiply_ctp_costs = 0,
-                   miss_percentage = [0],
+                   costs_per_ctp=0, 
+                   multiply_ctp_costs=0, #NNI multiplier
+                   miss_percentage=[0],
                    WTP = 80000):
      #converts totals_res to depict results per core_volume decision threshold
      #also can be used to simulate miss_percentage of M2s
@@ -84,6 +84,7 @@ def cohort_outcome(df_res,
             #combine CTP and noCTP arms horizontally
             outcome = pd.concat([CTP,noCTP],axis=1,join='outer')
             outcome.index = outcome['ID']
+            outcome['C_ctp'] = outcome['C_ctp']+add_ctp_costs
             outcome['d_costs'] = outcome['C_ctp']-outcome['C_noctp']
             outcome['d_qalys'] = outcome['Q_ctp']-outcome['Q_noctp']
             outcome['NMB'] = outcome['d_qalys']*WTP+outcome['d_costs']*-1
