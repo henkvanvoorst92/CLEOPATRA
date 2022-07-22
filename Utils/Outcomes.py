@@ -103,11 +103,94 @@ def cohort_outcome(df_res,
     aggr = pd.concat(aggrs,axis=1).T
     return out, aggr
 
+def median_iqr_results(df_median,df_p25,df_p75, threshold, colname='', qaly_multiplier=1):
+    variables = df_median.columns
     
-# folder = 'EVT_effect'
-# d = os.path.join(root_sav,'PSA',folder)
-# CEA_res = pd.read_pickle(os.path.join(d,'probabilistic_ICER_results.pic'))
-# CEA_res.subgroup = [s[:15 ]for s in CEA_res.subgroup]
-# for sg in CEA_res.subgroup.unique():
-#     tmp = CEA_res[CEA_res==sg]
-#     plot_res(aggrs,sg)
+    n_digits = 7
+    if qaly_multiplier>100:
+        n_digits = 2
+    
+    combined = []
+    for v in variables:
+        if 'c_' in v.lower() or 'q_' in v.lower() or \
+        'NMB' in v or 'ICER' in v or \
+        'd_costs' in v.lower() or 'd_qalys' in v.lower():
+            m = df_median.loc[threshold].loc[v]
+            p25 = df_p25.loc[threshold].loc[v]
+            p75 = df_p75.loc[threshold].loc[v]
+            if 'q_' in v.lower() or 'd_qalys' in v.lower():
+                value = '{}({};{})'.format(round(m*qaly_multiplier,n_digits),
+                                           round(p25*qaly_multiplier,n_digits),
+                                           round(p75*qaly_multiplier,n_digits))
+                combined.append(value)
+            else:
+                value = '{}({};{})'.format(m.astype(int),p25.astype(int),p75.astype(int))
+                combined.append(value)
+        else:
+            value = df_median.loc[threshold].loc[v]
+            combined.append(value)
+        #print(v,value)
+    #return pd.DataFrame(data=combined,index=variables,columns=[colname])
+    return combined
+
+def OR_shift_results(aggr_res,
+                     OR_evt_shifts = [-.3,-.2,-.1,0,.1,.2,.3,.82],
+                     OR_evt_corevol_shifts = [-.1,-.05,0], 
+                     savloc=None):
+    #computes results for pivot table of OR shift results
+    out = []
+    res_grouper = aggr_res.groupby(['OR_evt_shift', 'OR_evt_corevol_shift','threshold'])
+    for evt_shift in OR_evt_shifts:
+        for evt_corevol_shift in OR_evt_corevol_shifts:
+            tmp_median = res_grouper.median().reset_index(drop=False)
+            tmp_median = tmp_median[(tmp_median['OR_evt_shift']==evt_shift)&(tmp_median['OR_evt_corevol_shift']==evt_corevol_shift)]
+            tmp_median.index = tmp_median['threshold']
+
+            tmp_p25 = res_grouper.quantile(0.25).reset_index(drop=False)
+            tmp_p25 = tmp_p25[(tmp_p25['OR_evt_shift']==evt_shift)&(tmp_p25['OR_evt_corevol_shift']==evt_corevol_shift)]
+            tmp_p25.index = tmp_p25['threshold']
+            
+            tmp_p75 = res_grouper.quantile(0.75).reset_index(drop=False)
+            tmp_p75 = tmp_p75[(tmp_p75['OR_evt_shift']==evt_shift)&(tmp_p75['OR_evt_corevol_shift']==evt_corevol_shift)]
+            tmp_p75.index = tmp_p75['threshold']
+            #use optimal NMB to identify optimal threshold
+            max_NMB_threshold = tmp_median['NMB'].idxmax()      
+
+            row = median_iqr_results(tmp_median,tmp_p25,tmp_p75, max_NMB_threshold, qaly_multiplier=365)
+            out.append(row)
+
+    out = pd.DataFrame(out,columns = [*list(tmp_median.columns)]) 
+
+    if savloc is not None:
+        if not os.path.exists(savloc):
+            os.makedirs(savloc)
+        
+        out.to_excel(os.path.join(savloc,'OR_shift.xlsx'))
+
+    __ = pivot_results(out,
+                        xvar='OR_evt_shift', 
+                        yvar='OR_evt_corevol_shift',
+                        outcomes=['threshold','NMB','ICER','d_qalys','d_costs'],
+                        name='OR_shift_outcomes',
+                        savloc=savloc)
+    
+    return out
+
+def pivot_results(data,xvar,yvar,outcomes,name='',savloc=None):
+    #outcomes: ['threshold','NMB','ICER','d_qalys','d_costs']
+    if savloc is not None:
+        if not os.path.exists(savloc):
+            os.makedirs(savloc)
+    pivot_out = []
+    for outcome in outcomes:
+        tmp = data.pivot(index=xvar, 
+                        columns=yvar, 
+                        values=outcome)
+        tmp['outcome'] = outcome
+        pivot_out.append(tmp)
+    pivot_out = pd.concat(pivot_out)
+    if savloc is not None:
+        pivot_out.to_excel(os.path.join(savloc,'{}.xlsx'.format(name)))
+    return pivot_out
+
+

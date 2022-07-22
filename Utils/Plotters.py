@@ -12,28 +12,42 @@ def reorder_labels_ix(curr_order,pref_order):
     return new_order
     
 
-def ICER_plot(aggrs, name, root_fig=None, min_x=-.15,max_x =.15, min_y=-12000, max_y=12000, wtp=80000):
-
-    d1 = aggrs[(aggrs.threshold>=50)&(aggrs.threshold<70)]
-    d1['group'] = '>50mL'
-    d2 = aggrs[(aggrs.threshold>=70)&(aggrs.threshold<100)]
-    d2['group'] = '>70mL'
-    d3 = aggrs[aggrs.threshold>=100]
-    d3['group'] = '>100mL'
+def ICER_plot_thresholds(aggrs, name='', 
+                         root_fig=None, 
+                         minmax_xy=[-.15, .15,-12000,12000],
+                         wtp=80000,color_palette='bwr', multiply_QALY=1):
+    d1 = aggrs[(aggrs.threshold>=70)&(aggrs.threshold<90)]
+    d1['group'] = '>70mL'
+    d2 = aggrs[(aggrs.threshold>=90)&(aggrs.threshold<110)]
+    d2['group'] = '>90mL'
+    d3 = aggrs[aggrs.threshold>=110]
+    d3['group'] = '>110mL'
     dataplot = pd.concat([d1, d2, d3])
     dataplot.group.unique()
+    
+    dataplot.d_qalys *= multiply_QALY
+
+    if minmax_xy is None:
+        min_x = dataplot.d_qalys.min()*0.9*multiply_QALY
+        max_x = dataplot.d_qalys.max()*1.1*multiply_QALY
+        min_y = dataplot.d_costs.min()*0.9
+        max_y = dataplot.d_costs.max()*1.1
+    else:
+        min_x, max_x, min_y, max_y = minmax_xy
     
     x = np.linspace(min_x, max_x)
     y_b = np.arange(min_y, max_y,50)
     y = wtp*x
     sns.lineplot(x,np.zeros_like(x),color='black',linewidth=1)
     sns.lineplot(np.zeros_like(y_b),y_b,color='black',linewidth=1,estimator=None)
-    sns.scatterplot(data=dataplot,x='d_qalys',y='d_costs', hue='group')
-    sns.lineplot(x,y,color='black')
+    sns.scatterplot(data=dataplot,
+                    x='d_qalys',y='d_costs', 
+                    hue='group',s=10,palette=color_palette)
+    sns.lineplot(x,y,color='black', linestyle="dashed")
     plt.ylim(min_y, max_y)
     plt.xlim(min_x, max_x)
-    plt.ylabel('Difference in costs(€) (CTP - noCTP)')
-    plt.xlabel('Difference in QALYS (CTP - noCTP)')
+    plt.ylabel('Difference in costs(€) (CTP - no CTP)')
+    plt.xlabel('Difference in QALY (CTP - no CTP)')
     plt.gcf().subplots_adjust(left=0.15)
     if root_fig is not None:  
         if not os.path.exists(root_fig):
@@ -41,22 +55,25 @@ def ICER_plot(aggrs, name, root_fig=None, min_x=-.15,max_x =.15, min_y=-12000, m
         plt.savefig(os.path.join(root_fig,'ICER_{}.tiff'.format(name)),dpi=300)
     plt.show()
 
+
 def single_ICER_plot(dataplot, 
                      name, 
                      root_fig=None, #if a path the figure is saved
                      minmax_xy=None,#[-.15, .15,-12000,12000],
                      color='black',
-                     wtp=80000):
+                     wtp=80000, multiply_QALY=1):
     
     if minmax_xy is None:
-        min_x = dataplot.d_qalys.min()*0.9
-        max_x = dataplot.d_qalys.max()*1.1
+        min_x = dataplot.d_qalys.min()*0.9*multiply_QALY
+        max_x = dataplot.d_qalys.max()*1.1*multiply_QALY
         min_y = dataplot.d_costs.min()*0.9
         max_y = dataplot.d_costs.max()*1.1
     else:
         min_x, max_x, min_y, max_y = minmax_xy
     
-    print(min_x, max_x, min_y, max_y)
+    dataplot.d_qalys *= multiply_QALY
+
+    #print(min_x, max_x, min_y, max_y)
     x = np.linspace(min_x, max_x)
     y_b = np.arange(min_y, max_y,50)
     y = wtp*x
@@ -67,56 +84,80 @@ def single_ICER_plot(dataplot,
     plt.ylim(min_y, max_y)
     plt.xlim(min_x, max_x)
     plt.ylabel('Difference in costs(€) (CTP - no CTP)')
-    plt.xlabel('Difference in QALYs (CTP - no CTP)')
+    plt.xlabel('Difference in QALY (CTP - no CTP)')
     plt.gcf().subplots_adjust(left=0.15)
     if root_fig is not None:  
         if not os.path.exists(root_fig):
             os.makedirs(root_fig)
-        plt.savefig(os.path.join(root_fig,'ICER_{}.tiff'.format(name)),dpi=300)
+        plt.savefig(os.path.join(root_fig,'ICER_plot_{}.tiff'.format(name)),dpi=300)
     plt.show()
+
+def ICER_plot_sources(dataplot, 
+                     name='', 
+                     root_fig=None, #if a path the figure is saved
+                     minmax_xy=None,#[-.15, .15,-12000,12000],
+                     color_palette='bright',
+                     wtp=80000, multiply_QALY=1):
+    
+    if minmax_xy is None:
+        min_x = dataplot.d_qalys.min()*0.9*multiply_QALY
+        max_x = dataplot.d_qalys.max()*1.1*multiply_QALY
+        min_y = dataplot.d_costs.min()*0.9
+        max_y = dataplot.d_costs.max()*1.1
+    else:
+        min_x, max_x, min_y, max_y = minmax_xy
+    
+    dataplot.d_qalys *= multiply_QALY
+
+    #print(min_x, max_x, min_y, max_y)
+    x = np.linspace(min_x, max_x)
+    y_b = np.arange(min_y, max_y,50)
+    y = wtp*x
+    sns.lineplot(x,np.zeros_like(x),color='grey',linewidth=1)
+    sns.lineplot(np.zeros_like(y_b),y_b,color='grey',linewidth=1,estimator=None)
+    sns.scatterplot(data=dataplot,
+                    x='d_qalys',y='d_costs', 
+                    hue='source', 
+                    s=5,alpha=.5,
+                    palette=color_palette)
+    sns.lineplot(x,y,color='black', linestyle="dashed")
+    plt.ylim(min_y, max_y)
+    plt.xlim(min_x, max_x)
+    plt.ylabel('Difference in costs(€) (CTP - no CTP)')
+    plt.xlabel('Difference in QALY (CTP - no CTP)')
+    plt.gcf().subplots_adjust(left=0.15)
+    if root_fig is not None:  
+        if not os.path.exists(root_fig):
+            os.makedirs(root_fig)
+        plt.savefig(os.path.join(root_fig,'ICER_plot_{}.tiff'.format(name)),dpi=300)
+    plt.show()
+
 
 def plot_outcome_per_threshold(aggrs,
                                name,
                                root_fig=None,
                                colors = ['black','black','black','black']):
-    #write funciton for this
-    sns.lineplot(data=aggrs,x='threshold',y='d_costs',
-                 color=colors[0],ci='sd')
-    plt.ylabel('Difference in costs(€) (CTP - no CTP)')
-    plt.xlabel('Ischemic core volume decision threshold (mL)')
-    #plt.title('Costs')
-    plt.gcf().subplots_adjust(left=0.15)
-    if root_fig is not None:
-        plt.savefig(os.path.join(root_fig,'Costs_{}.tiff'.format(name)),dpi=300)
-    plt.show()
+    if not os.path.exists(root_fig):
+        os.makedirs(root_fig)
 
-    sns.lineplot(data=aggrs,x='threshold',y='d_qalys',
-                 color=colors[1],ci='sd')
-    plt.ylabel('Difference in QALYS (CTP - no CTP)')
-    plt.xlabel('Ischemic core volume decision threshold (mL)')
-    #plt.title('QALY')
-    plt.gcf().subplots_adjust(left=0.15)
-    if root_fig is not None:
-        plt.savefig(os.path.join(root_fig,'QALYs_{}.tiff'),dpi=300)
-    plt.show()
+    aggrs = aggrs.reset_index(drop=True).groupby('threshold')
+    medians = aggrs.median()
+    p25 = aggrs.quantile(0.25)
+    p75 = aggrs.quantile(0.75)
+    thr = medians.index
 
-    sns.lineplot(data=aggrs,x='threshold',y='NMB', 
-                 color=colors[2],ci='sd')
-    plt.xlabel('Ischemic core volume decision threshold (mL)')
-    #plt.title('NMB')
-    plt.gcf().subplots_adjust(left=0.15)
-    if root_fig is not None:
-        plt.savefig(os.path.join(root_fig,'NMB_{}.tiff'.format(name)),dpi=300)
-    plt.show()
-
-    sns.lineplot(data=aggrs,x='threshold',y='ICER', 
-                 color=colors[3],ci='sd')
-    plt.xlabel('Ischemic core volume decision threshold (mL)')
-    #plt.title('ICER')
-    plt.gcf().subplots_adjust(left=0.15)
-    if root_fig is not None:
-        plt.savefig(os.path.join(root_fig,'ICER_thr_{}.tiff'.format(name)),dpi=300)
-    plt.show()
+    variables = [('d_costs', 'costs(€)'),('d_qalys','QALY'),('NMB','NMB'),('ICER','ICER')]
+    for ix,(v,vname) in enumerate(variables):
+        ax = sns.lineplot(thr, medians[v],color=colors[ix]) 
+        ax.fill_between(thr, p25[v],p75[v], alpha=0.3,color=colors[ix])
+        if 'd_' in v:
+            plt.ylabel('Difference in {} (CTP - no CTP)'.format(vname))
+            plt.xlabel('Ischemic core volume decision threshold (mL)')
+        #plt.title('Costs')
+        plt.gcf().subplots_adjust(left=0.25)
+        if root_fig is not None:
+            plt.savefig(os.path.join(root_fig,'{}_{}.tiff'.format(v,name)),dpi=300)
+        plt.show()
     
 def M2_detection_plotter(aggr, nni_mult,name='',fig_loc=None,plette='bwr'): #, label_order=None
     aggr['ICER'] = aggr['d_costs']/aggr['d_qalys']

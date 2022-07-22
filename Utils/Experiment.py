@@ -42,8 +42,9 @@ def simulate_IDs(IDs,df,Simulator, verbal=True):
         #per patient get the total costs and QALYs
         tot = tmp.groupby(by=['ctp','treatment'])[['TotCosts','TotQALYs']].sum(axis=1)
         #get all totals in a single row per pt ID
-        tot_res.append([pt_dct['ID'],
-                       *list(tot.loc['CTP','EVT'].values),
+        tot_res.append([
+                        pt_dct['ID'],
+                        *list(tot.loc['CTP','EVT'].values),
                         *list(tot.loc['CTP','noEVT'].values),
                         *list(tot.loc['noCTP','EVT'].values),
                         *list(tot.loc['noCTP','noEVT'].values)
