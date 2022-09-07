@@ -29,8 +29,11 @@ class ControlPatientGeneration(object):
         #initialize dictionary for OR extraction
         self.p_OR = p_OR
         df = pd.read_excel(self.p_OR)
-        #_set_params enables alteration of OR values --> uses self.p_OR
-        self._set_params(df) #sets self.OR --> default param dict with low-high CI
+        df.index = df.varname
+        self.df_org = df.copy()
+        #init OR dict from df and OR variables
+        self.OR = df.to_dict(orient='index')
+        self._init_OR(mode='default') #initialize base on self.OR 
         
         self.nums_mrs = pd.read_excel(p_nums_mrs)
         self.dataset = dataset
@@ -76,7 +79,7 @@ class ControlPatientGeneration(object):
             print('Odds(goodmRS|control)',odds_goodmrs_control)
             print('p(goodmRS|control)',p_good_mrs_control)
         return p_good_mrs_control
-    
+
     def _init_OR(self,mode='default'):
         #initializes a dictionary of OR to use
         self.dct_OR = {}
@@ -91,7 +94,6 @@ class ControlPatientGeneration(object):
                 print(k,v['OR'],self.dct_OR[k] )
 
     def _mrs_distribution(self,p_good_mrs_noevt,mrs, mrs01=True):
-
         mrs_noevt = np.zeros(7)
         mrs_noevt[mrs] = p_good_mrs_noevt
         mrs_noevt[min(mrs+1,6)] = 1-p_good_mrs_noevt #use min as mrs cannot be>6
@@ -112,16 +114,22 @@ class ControlPatientGeneration(object):
         #if current returns the current variables
         #else the original df is loaded --> used for PSA/OneWay
         if not current:
-            df = pd.read_excel(self.p_OR)
-            self._set_params(df)
+            df = self.df_org.copy()
+            self.OR = df.to_dict(orient='index')
+            self._init_OR(mode='default') #initialize base on self.OR 
         #returns values used for simulations
         out = pd.DataFrame(self.OR).T #converts back to input df
+        out['variable'] = out['varname']
+        out['value'] = out['OR']
+        out['variable_type'] = 'OR_tx'
         out['object'] = 'CPG'
         return out
 
-    def _set_params(self,df):
+    def _set_params(self,data):
         #sets values used for simulation
+        df = data[data['object']=='CPG']
         df.index = df.varname
+        df['OR'] = df['OR'].astype(np.float32)
         self.OR = df.to_dict(orient='index')
         self._init_OR(mode='default') #initialize base on self.OR 
 
@@ -132,7 +140,6 @@ class ControlPatientGeneration(object):
 
         mrs = pt_dct['mrs']
         if mrs<6:
-        
             OR_new = self._combined_OR(pt_dct)
             if self.verbal:
                 print('OR new',OR_new)
@@ -193,7 +200,6 @@ class Simulate(object):
             self.RS.verbal = self.verbal
             self.C.verbal = self.verbal
             self.Q.verbal = self.verbal
-
     
     def _probabilistic_resample(self):
         # resample all parameters for probabilistic sensitivity analyses (PSA)
@@ -202,6 +208,28 @@ class Simulate(object):
         self.RS._probabilistic_resample()
         self.C._probabilistic_resample()
         self.Q._probabilistic_resample()
+
+    def _get_all_params(self, current=False):
+        # resample all parameters for probabilistic sensitivity analyses (PSA)
+        tmp1 = self.CPG._get_params(current=current)
+        tmp2 = self.M._get_params(current=current)
+        tmp3 = self.RS._get_params(current=current)
+        tmp4 = self.C._get_params(current=current)
+        tmp5 = self.Q._get_params(current=current)
+
+        out = pd.concat([tmp1,tmp2,tmp3,tmp4,tmp5])
+        return out
+
+    def _set_all_params(self,data):
+        data = data.copy().reset_index(drop=True)
+
+        self.CPG._set_params(data)
+        self.M._set_params(data)
+        self.RS._set_params(data)
+        self.C._set_params(data)
+        self.Q._set_params(data)
+
+        self.data = data
     
     def _90d_both_arms(self,pt_dct):
         ID = pt_dct['ID']
@@ -275,12 +303,13 @@ class Simulate(object):
                        sex,cur_age):
         
         # simulate mortality and stroke recurrence of ctp arm
+        prev_mrs = cur_mrs.copy()
         cur_mrs, __ = self.M(sex,cur_year,cur_age,cur_mrs)
         cur_mrs, __ = self.RS(yearno,cur_age,cur_mrs)
 
         #compute costs and qalys of ctp arm
-        costs = self.C(cur_mrs,yearno)
-        qalys = self.Q(cur_mrs,yearno)
+        costs = self.C(cur_mrs, yearno, prev_mrs)
+        qalys = self.Q(cur_mrs, yearno, prev_mrs)
 
         row = [ID,treatment,ctp_noctp,
                 cur_year,yearno, 
@@ -355,7 +384,7 @@ class Simulate(object):
     def __call__(self,pt_dct):
         
         #sim_control can be set to false since control arm is only required once
-        
+        #print(pt_dct)
         #simulate 90-day outcome (as 1-year outcome in costs)
         cur_mrs_CTP_evt, cur_mrs_CTP_noevt, \
         cur_mrs_noCTP_evt, cur_mrs_noCTP_noevt, out = self._90d_both_arms(pt_dct)
@@ -386,59 +415,3 @@ class Simulate(object):
         return df_out
 
 
-
-
-# def compute_shift_no_evt(pt_dct, ORs):
-#     """
-#     pt_dct: dict with keys are also keys in ORs 
-#             values are used to compute absolute shift
-#     ORs: dict with keys of Tx values are Odds Ratios for favorable mRS
-    
-#     return one hot encoded probabilities of mRS for given patient
-#     """
-#     p_shift = 0
-#     for name,OR in ORs.items():
-#         if name in pt_dct.keys():
-#             p_shift -= pt_dct[name]*np.log(OR)
-#     mRS = np.zeros(7)
-#     #compute one hot embedding
-#     fl_new_mrs = pt_dct['mRS']+p_shift
-#     new_mrs = int(np.floor(fl_new_mrs))
-#     p_new_mrs = 1-(fl_new_mrs-new_mrs)
-#     mRS[new_mrs] = p_new_mrs 
-#     mRS[new_mrs+1] = 1-p_new_mrs 
-#     return mRS
-
-# def get_mRS_EVT_noEVT(df,ORs):
-#     """  
-#     df is a pandas.DataFrame existing of patients with EVT:
-#         index=ID
-#         columns: mRS and keys in ORs
-#     ORs is a dictionary with Odds Ratios for treatment effect (OR for favorable outcome)
-    
-#     returns: one hot encoded mRS of patient if EVT was given or not (noEVT)
-#     """
-#     dct = df.to_dict(orient='index')
-#     out = []
-#     for pt_dct in dct.values():
-#         mrs = compute_shift_no_evt(pt_dct, ORs)
-#         out.append(mrs.tolist())
-#     noEVT = pd.DataFrame(out, columns=[*['noEVT_mRS_'+str(i) for i in range(7)]], index=dct.keys())
-#     EVT = pd.get_dummies(df['mRS'], prefix='EVT_mRS')
-#     df_out = pd.concat([EVT,noEVT], ignore_index=False, axis=1)
-#     return df_out
-
-# def mRS_90d_2arms(input_dist,ID_treat_select, return_relative=False):
-#     evt_cols = [c for c in input_dist.columns if not 'noevt' in c.lower()]
-#     noevt_cols = [c for c in input_dist.columns if 'noevt' in c.lower()]
-
-#     select_EVT = input_dist.loc[ID_treat_select][evt_cols]
-#     exclude_EVT = input_dist[~np.isin(input_dist.index,ID_treat_select)][noevt_cols]
-
-#     p_evt_90d_mrs = select_EVT.sum(axis=0)
-#     p_noevt_90d_mrs = exclude_EVT.sum(axis=0)
-#     if return_relative:
-#         p_evt_90d_mrs = p_evt_90d_mrs /p_evt_90d_mrs.sum()
-#         p_noevt_90d_mrs = p_noevt_90d_mrs/p_noevt_90d_mrs.sum()
-        
-#     return p_evt_90d_mrs, p_noevt_90d_mrs, select_EVT, exclude_EVT

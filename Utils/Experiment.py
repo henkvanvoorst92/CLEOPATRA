@@ -4,7 +4,7 @@ import os
 from tqdm import tqdm
 from Utils.Outcomes import *
 
-def get_patient_dct(df,ID):
+def get_patient_dct(df,ID, xvar='core_vol'):
     #converts patient data to dictionary 
     #that can be parsed by Simulator object
     pt = df.loc[ID]
@@ -12,17 +12,19 @@ def get_patient_dct(df,ID):
     pt_dct['ID'] = pt['IDs']
     pt_dct['mrs'] = pt['mrs_def']
     pt_dct['noEVT'] = 1
-    pt_dct['noEVT*core_vol'] = int(pt['core_vol'])
+    pt_dct['noEVT*core_vol'] = int(pt[xvar])
     pt_dct['IVT'] = pt['ivt_given']
     pt_dct['age'] = pt['r_age']
     pt_dct['sex'] = pt['r_sex']
     pt_dct['occloc'] = pt['bl_occloc']
     return pt_dct
 
-def simulate_IDs(IDs,df,Simulator, verbal=True):
+def simulate_IDs(IDs,df,Simulator,xvar='core_vol', verbal=True):
     #IDs: selection of IDs in df used for simulation (can be for subgroup only)
     #df: dataframe with index=ID, columns=variables and mrs
     #Simulator: class object initialized for simulations (see Simulate.py)
+    #xvar: what variable from df (core_vol, penumbra_vol, or mm-ratio) 
+    #should be used with ORs to compute control arm
     # returns:
         # total_res: for each arm per patient in columns the Costs and Qalys per strategy
         # extended_res: each row contains per ID,treatment,CTP use, and year the mRS, Costs, Qalys
@@ -34,7 +36,7 @@ def simulate_IDs(IDs,df,Simulator, verbal=True):
         IDs = list(IDs)
 
     for ID in IDs:
-        pt_dct = get_patient_dct(df,ID)
+        pt_dct = get_patient_dct(df,ID,xvar)
         #per patient get tmp_res: results
         # store all in a single df
         tmp = Simulator(pt_dct) #simulate a single patient
@@ -60,11 +62,13 @@ def simulate_IDs(IDs,df,Simulator, verbal=True):
     return totals_res, extend_res
 
 
-def probabilistic_simulation(S,df,N_resamples,N_patients_per_cohort,seed=21):
+def probabilistic_simulation(S,df,N_resamples,N_patients_per_cohort,xvar='core_vol',seed=21):
     #S: initialized Simulate class object (contains all the data and methods)
     #df: dataframe with index=ID and columns with patient variables
     #N_resamples: Number of probabilistic resamples to run
     #N_patients_per_cohort: Number of patients per cohort
+    #xvar: what variable from df (core_vol, penumbra_vol, or mm-ratio) 
+    #should be used with ORs to compute control arm
     #returns: similar to return of simulate_IDs but per N_resmaples iteration
     np.random.seed(seed)
     tots,exts = [],[]
@@ -79,7 +83,7 @@ def probabilistic_simulation(S,df,N_resamples,N_patients_per_cohort,seed=21):
         #sample a cohort of IDs with replaceemnt
         smpl = df.sample(nppc,replace=True, random_state=i).index
         #simulation output
-        totals_res, extend_res = simulate_IDs(smpl,df,S,False)
+        totals_res, extend_res = simulate_IDs(smpl,df,S,xvar,False)
         totals_res['simno'] = i
         totals_res['OR_noEVT'] = S.CPG.dct_OR['noEVT']
         totals_res['OR_noEVT_corevol'] = S.CPG.dct_OR['noEVT*core_vol']
@@ -104,9 +108,12 @@ def subgroup_psa(df,
                  costs_per_ctp=0,
                  multiply_ctp_costs=0,
                  miss_percentage=[0],
+                 xvar='core_vol',
                  WTP=80000,
                  seed=21):
     #performs PSA for each subgroup
+    #xvar: what variable from df (core_vol, penumbra_vol, or mm-ratio) 
+    #should be used with ORs to compute control arm
     #just splits each input cohort
     np.random.seed(seed)
 
@@ -121,7 +128,7 @@ def subgroup_psa(df,
             nppc = N_patients_per_cohort
         totals_res,extend_res = probabilistic_simulation(Sim,tmp,
                                                         N_resamples,
-                                                        nppc)
+                                                        nppc,xvar=xvar)
 
         outs, aggrs,__ = probabilistic_cohort_outcomes(totals_res,
                                                     bl_dct,
@@ -143,6 +150,7 @@ def shift_EVT_OR(CPG,shift):
     cpg_params = CPG._get_params(current=False) #current=False returns original df and shifts the original data
     new_cpg_params = cpg_params.copy()
     params = 1/(1/new_cpg_params.loc['noEVT',['OR','CI_low','CI_high']]+shift).astype('float')
+    print(params)
     new_cpg_params.loc['noEVT',['OR','CI_low','CI_high']] = params
     CPG._set_params(new_cpg_params)
     return CPG
@@ -189,10 +197,15 @@ def OR_shift_psa(df,
                  N_patients_per_cohort,
                  thresholds=np.arange(0,151,10),
                  WTP=80000,
+                 xvar = 'core_vol',
                  root_sav=None,
                  seed=21):
     #special type of sensitivity analyses:
     # the input 90d ORs are altered
+
+    #xvar: what variable from df (core_vol, penumbra_vol, or mm-ratio) 
+    #should be used with ORs to compute control arm
+    
     np.random.seed(seed)
 
     #set all seeds!!
@@ -217,7 +230,8 @@ def OR_shift_psa(df,
             totals_res,extend_res = probabilistic_simulation(Sim,
                                                              df,
                                                              N_resamples,
-                                                             nppc)
+                                                             nppc, xvar=xvar)
+
             outs, aggrs, fr = probabilistic_cohort_outcomes(totals_res,
                                                         bl_dct,
                                                         costs_per_ctp=0, #should only be used for M2 miss sims
@@ -349,4 +363,192 @@ def M2_miss_psa(df,
         res_extended = pd.concat(res_ext)
         return res_extended, res_aggr
 
+
+def occl_detect_psa(df,
+                 Sim,
+                 N_resamples, #10,000 in protocol --> use 1,000
+                 N_patients_per_cohort, #100 pt in protocol
+                 screening_multipliers=[0], 
+                 OR_evt_shift=[0], #it is likely EVT effect is lower in M2
+                 miss_percentage=[0,.1,.2,.3,.4,.5],
+                 WTP=80000,
+                 root_sav=None,
+                 seed=21):
+    np.random.seed(seed)
+    #function runs PSA simulations
     
+    if root_sav is not None:
+        if not os.path.exists(root_sav):
+            os.makedirs(root_sav)
+    #set all seeds!!
+    #screening_multiplier: multiplied with CTP costs to 
+    #represent number needed to image before a 'missed' M2 
+    #is detected --> thus population costs are in the analysis
+    bl_dct = df.to_dict(orient='index')
+
+    #tmp = df[(df['bl_occloc']=='M2')|(df['bl_occloc']=='M3')]
+    tmp = df
+    if N_patients_per_cohort=='auto':
+        nppc = len(tmp)
+    else:
+        nppc = N_patients_per_cohort
+    res_ext, res_aggr = [],[]
+    #simulate multiple EVT effects
+    NNI_multiplier = 0
+    for evt_shift in OR_evt_shift:
+        f1 = os.path.join(root_sav,'EVT{}_NNI{}_aggregated_psa_res.pic'.format(evt_shift,NNI_multiplier))
+        f2 = os.path.join(root_sav,'EVT{}_NNI{}_extended_psa_res.pic'.format(evt_shift,NNI_multiplier))
+               
+        #check if result file exists already
+        done = np.array(['EVT'+str(evt_shift)+'_' in f for f in os.listdir(root_sav)]).sum()
+        print(evt_shift,done,len(screening_multipliers))
+        if done==2*len(screening_multipliers):
+            continue
+        Sim.CPG = shift_ORs(Sim.CPG,shift_dct={'EVT':evt_shift})
+        totals_res,extend_res = probabilistic_simulation(Sim,
+                                                         tmp,#only simulate for M2
+                                                         N_resamples,
+                                                         nppc)
+
+
+        outs, aggrs,__ = probabilistic_cohort_outcomes(totals_res, 
+                                                    bl_dct,
+                                                    thresholds=[20000], #nobody should be excluded
+                                                    costs_per_ctp=Sim.C.costs_CTP,
+                                                    multiply_ctp_costs = NNI_multiplier, #add CTP costs after simulations
+                                                    miss_percentage = miss_percentage, #also simpulate varying sensitivity gains due to CTP
+                                                    WTP = WTP)
+
+        outs['NNI_multiplier'] = NNI_multiplier
+        aggrs['NNI_multiplier'] = NNI_multiplier
+        outs['evt_shift'] = evt_shift
+        aggrs['evt_shift'] = evt_shift
+
+        res_ext.append(outs)
+        res_aggr.append(aggrs)
+        if root_sav is not None:
+            res_aggr = pd.concat(res_aggr)
+            res_extended = pd.concat(res_ext)
+            res_aggr.to_pickle(f1)
+            res_extended.to_pickle(f2)
+            res_aggr, res_extended = [],[]
+
+    if root_sav is not None:
+        print('Creating final file')
+        res_aggr = pd.concat([pd.read_pickle(os.path.join(root_sav,f)) for f in os.listdir(root_sav) if '_aggregated_psa_res' in f])
+        #res_extended = pd.concat([pd.read_pickle(os.path.join(root_sav,f)) for f in os.listdir(root_sav) if '_extended_psa_res' in f])
+
+        res_aggr.to_pickle(os.path.join(root_sav,'full_aggregated_psa_res.pic'))
+        #res_extended.to_pickle(os.path.join(root_sav,'full_extended_psa_res.pic'))
+        return res_aggr 
+    else:
+        res_aggr = pd.concat(res_aggr)
+        res_extended = pd.concat(res_ext)
+        return res_extended, res_aggr
+
+def oneway_data(S,up=.1,down=.1):
+    data = S._get_all_params(current=False)
+    data['obj_var'] = [ '{}_{}'.format(row['object'],row['variable']) for c,row in data.iterrows()]
+    data.index = data['obj_var']
+    data['up'] = data['value'].copy()*(1+up)
+    data['down'] = data['value'].copy()*(1-down)
+    return data
+
+def BL_sim(S,df, thresholds=[70], WTP=80000):
+    bl_cols = ['core_vol', 'penumbra_vol', 'mm_ratio', 'bl_occloc',
+           'r_age', 'bl_nihss_sum', 't_otg','r_sex','ivt_given', 
+            'bl_collaterals','bl_hist_premrs','iat_post_etici',
+            'age_groups','otg_groups']
+    BL = df[bl_cols]
+    
+    totals_res, extend_res = simulate_IDs(df.index,df,S)
+    #add clinical basline info for plots
+    totals_res = pd.concat([totals_res,BL],axis=1)
+    #aggr contains average results in NMB, ICER, d_costs,d_qalys
+    # of the cohort per different decision threshold
+    __,aggr = cohort_outcome(totals_res,
+                            thresholds=thresholds, 
+                            costs_per_ctp=0, #used for miss rate sim
+                            multiply_ctp_costs = 0,#used for miss rate sim -->perform only on M2
+                            miss_percentage = [0],#used for miss rate sim
+                            WTP=WTP)
+    return aggr
+
+
+def oneway_sensitivity(S,data,df, root_sav=None):
+    #S: simulation object
+    #data: contains columns up and down 
+    # used as range for oneway sensitivity analysis
+    #df: dataframe with patients
+    bl = BL_sim(S,df)
+    #add lower upper for dataframe consistency
+    lower, upper = bl.copy(), bl.copy()
+    lower.columns = [c+'_lower' for c in lower]
+    upper.columns = [c+'_upper' for c in upper]
+    row = pd.concat([lower,upper],axis=1)
+    row['variable'] = 'baseline'
+
+    out = [row]
+    for ix,row in tqdm(data.iterrows()):
+        tmpdata = data.copy()
+        #run lower sim
+        tmpdata.at[ix,'value'] = row['down']
+        S._set_all_params(tmpdata)
+        lower = BL_sim(S,df)
+        #run upper sim
+        tmpdata.at[ix,'value'] = row['up']
+        S._set_all_params(tmpdata)
+        upper = BL_sim(S,df)
+
+        lower.columns = [c+'_lower' for c in lower]
+        upper.columns = [c+'_upper' for c in upper]
+        row = pd.concat([lower,upper],axis=1)
+        row['variable'] = ix
+
+        out.append(row)
+    out = pd.concat(out)
+    
+    if root_sav is not None:
+        if not os.path.exists(root_sav):
+            os.makedirs(root_sav)
+        out.to_excel(os.path.join(root_sav,'oneway_sensitivity.xlsx'))
+    return out
+
+
+
+def BL_sim_occlusion_detect(S,
+                            df,
+                            sens_dct={'ICA':.08,'M1':.16,'M2':.16},
+                            NNI=9.5,
+                            WTP=80000):
+
+
+    bl_cols = ['core_vol', 'penumbra_vol', 'mm_ratio', 'bl_occloc',
+           'r_age', 'bl_nihss_sum', 't_otg','r_sex','ivt_given', 
+            'bl_collaterals','bl_hist_premrs','iat_post_etici',
+            'age_groups','otg_groups']
+
+    #run sim for each separate occlusion location
+    tmp_df = df[(df['bl_occloc']=='ICA')|(df['bl_occloc']=='ICA-T')]
+    res_ICA, __ = simulate_IDs(tmp_df.index,df,S)
+    res_ICA['occloc'] = 'ICA'
+    res_ICA['sens_gain'] = sens_dct['ICA']
+
+    tmp_df = df[(df['bl_occloc']=='M1')]
+    res_M1, __ = simulate_IDs(tmp_df.index,df,S)
+    res_M1['occloc'] = 'M1'
+    res_M1['sens_gain'] = sens_dct['M1']
+
+    tmp_df = df[(df['bl_occloc']=='M2')]
+    res_M2, __ = simulate_IDs(tmp_df.index,df,S)
+    res_M2['occloc'] = 'M2'
+    res_M2['sens_gain'] = sens_dct['M2']
+
+    res_tot = pd.concat([res_ICA, res_M1, res_M2])
+    res_tot['NNI'] = NNI
+
+    __, aggr = cohort_outcome_occlusion_detection(res_tot.copy(), 
+                                           costs_per_ctp=S.C.costs_CTP, 
+                                           WTP = 80000)
+
+    return aggr

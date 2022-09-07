@@ -60,7 +60,9 @@ def cohort_outcome(df_res,
     out, aggrs = [],[]
     for mp in miss_percentage:
         #missed M2 percentage modelling
-        add_ctp_costs = (multiply_ctp_costs-1)*costs_per_ctp
+
+        add_ctp_costs = max((multiply_ctp_costs-1)*costs_per_ctp,0) #if negative returns zero
+
         miss_vec = np.array([1-mp,1-mp,mp,mp])
         for thr in thresholds:
             ##control arm without CTP --> all have EVT
@@ -93,7 +95,7 @@ def cohort_outcome(df_res,
             aggr['ICER'] = aggr['d_costs']/aggr['d_qalys']
             aggr['n_above_threshold'] = len(noEVT)
             aggr['threshold'] = thr
-            aggr['missed_M2'] = mp
+            aggr['sens_gain'] = mp
 
             outcome.columns = [c+'_'+str(thr) for c in outcome.columns]
             out.append(outcome)
@@ -102,6 +104,40 @@ def cohort_outcome(df_res,
     out = pd.concat(out,axis=1)
     aggr = pd.concat(aggrs,axis=1).T
     return out, aggr
+
+def cohort_outcome_occlusion_detection(df_res, 
+                                       costs_per_ctp=0, 
+                                       WTP = 80000):
+
+    mp = df_res['sens_gain'].values
+    miss_mat = np.array([1-mp,1-mp,mp,mp]).T
+
+    #control arm without CTP --> a percentage is missed
+    noCTP = df_res[['ID','C_noctp_evt','Q_noctp_evt',
+                  'C_noctp_noevt','Q_noctp_noevt']].copy().drop(columns='ID')
+    #this steps simulates that a % of patients are missed
+    noCTP = noCTP*miss_mat
+    noCTP['C_noctp'] = noCTP['C_noctp_evt']+noCTP['C_noctp_noevt']
+    noCTP['Q_noctp'] = noCTP['Q_noctp_evt']+noCTP['Q_noctp_noevt']
+
+    CTP = df_res[['ID','C_ctp_evt','Q_ctp_evt']].copy().drop(columns='ID')
+    CTP.columns = ['C_ctp', 'Q_ctp']
+    #add ctp costs
+    CTP['C_ctp'] += np.clip((df_res['NNI']-1)*200,0,1e9)
+
+    outcome = pd.DataFrame()
+    outcome[['C_ctp','Q_ctp']] = CTP[['C_ctp', 'Q_ctp']] 
+    outcome[['C_noctp','Q_noctp']] = noCTP[['C_noctp', 'Q_noctp']] 
+    outcome['d_costs'] = CTP['C_ctp']-noCTP['C_noctp']
+    outcome['d_qalys'] = CTP['Q_ctp']-noCTP['Q_noctp']
+    outcome['NMB'] = outcome['d_qalys']*WTP+outcome['d_costs']*-1
+    
+    aggr = outcome.mean()
+    aggr['ICER'] = aggr['d_costs']/aggr['d_qalys']
+    aggr['NNI'] = df_res['NNI'].values[0]
+    aggr['sens_gain'] = list(np.unique(mp))
+
+    return outcome, pd.DataFrame(aggr).T
 
 def median_iqr_results(df_median,df_p25,df_p75, threshold, colname='', qaly_multiplier=1):
     variables = df_median.columns
@@ -119,12 +155,12 @@ def median_iqr_results(df_median,df_p25,df_p75, threshold, colname='', qaly_mult
             p25 = df_p25.loc[threshold].loc[v]
             p75 = df_p75.loc[threshold].loc[v]
             if 'q_' in v.lower() or 'd_qalys' in v.lower():
-                value = '{}({};{})'.format(round(m*qaly_multiplier,n_digits),
+                value = '{} ({};{})'.format(round(m*qaly_multiplier,n_digits),
                                            round(p25*qaly_multiplier,n_digits),
                                            round(p75*qaly_multiplier,n_digits))
                 combined.append(value)
             else:
-                value = '{}({};{})'.format(m.astype(int),p25.astype(int),p75.astype(int))
+                value = '{} ({};{})'.format(m.astype(int),p25.astype(int),p75.astype(int))
                 combined.append(value)
         else:
             value = df_median.loc[threshold].loc[v]
@@ -194,3 +230,82 @@ def pivot_results(data,xvar,yvar,outcomes,name='',savloc=None):
     return pivot_out
 
 
+def combine_occloc_results(loc, #path to stored results )(f1)
+                           frac_dct, #proportion of each occloc in database (for averaging) dct[occloc]  = fraction
+                           costs_CTP, #costs of each CTP
+                           fu_years = [5], #fu years
+                           NNI_multipliers=[10], #NNI multiplier to add CTP screening costs
+                           OR_evt_shift=[-.3,0,.3,.82], #treament effect ORs for EVT considered (in filename f1)
+                           WTP = 80000):
+    
+    OUT1, OUT2 = [], []
+    for year in fu_years:
+        for NNI in NNI_multipliers:
+            for evt_shift in OR_evt_shift:
+
+                occloc  = 'ICA'
+                root_sav = os.path.join(loc,occloc,str(year)+'y')
+                f1 = os.path.join(root_sav,'EVT{}_NNI{}_aggregated_psa_res.pic'.format(evt_shift,0))
+                res_ICA = pd.read_pickle(f1)
+                bl = (res_ICA['missed_M2']-.08).astype(np.float32).round(2)
+                res_ICA['sens_gain_BL'] = bl #np.where((bl<-.04)|(bl>.04),np.full_like(bl,np.NaN),bl)
+                #print('ICA',res_ICA['sens_gain_BL'].unique())
+
+                occloc  = 'M1'
+                root_sav = os.path.join(loc,occloc,str(year)+'y')
+                f1 = os.path.join(root_sav,'EVT{}_NNI{}_aggregated_psa_res.pic'.format(evt_shift,0))
+                res_M1 = pd.read_pickle(f1)
+                bl = (res_M1['missed_M2']-.16).astype(np.float32).round(2)
+                res_M1['sens_gain_BL'] = bl #np.where((bl<-.04)|(bl>.04),np.full_like(bl,np.NaN),bl)
+                #print('M1',res_M1['sens_gain_BL'].unique())
+
+                occloc  = 'M2'
+                root_sav = os.path.join(loc,occloc,str(year)+'y')
+                f1 = os.path.join(root_sav,'EVT{}_NNI{}_aggregated_psa_res.pic'.format(evt_shift,0))
+                res_M2 = pd.read_pickle(f1)
+                bl = (res_M2['missed_M2']-.16).astype(np.float32).round(2)
+                res_M2['sens_gain_BL'] = bl #np.where((bl<-.04)|(bl>.04),np.full_like(bl,np.NaN),bl)
+                #print('M2',res_M2['sens_gain_BL'].unique())
+
+                out1, out2 = [], []
+                for data,occloc in [(res_ICA,'ICA'), (res_M1,'M1'), (res_M2,'M2')]:
+                    data['missed_M2'] = data['missed_M2'].astype(np.float32).round(2)
+                    data = data.sort_values(by=['missed_M2','simno'])
+
+                    combined_data = data[~data['sens_gain_BL'].isna()]
+                    combined_data = combined_data.set_index(['simno','sens_gain_BL'])
+                    combined_data = combined_data[['d_costs','d_qalys','NMB']]
+                    combined_data['d_costs_NNI'] = combined_data['d_costs']+costs_CTP*NNI*frac_dct[occloc]
+                    combined_data['NMB_NNI'] = WTP*combined_data['d_qalys']+combined_data['d_costs_NNI']*-1
+                    combined_data.columns = [c+'_'+occloc for c in combined_data.columns]
+                    out1.append(combined_data)
+
+                    data = data.set_index(['simno','missed_M2'])
+                    data = data[['d_costs','d_qalys','NMB']]
+                    data['d_costs_NNI'] = data['d_costs']+costs_CTP*NNI*frac_dct[occloc]
+                    data.columns = [c+'_'+occloc for c in data.columns]
+                    out2.append(data)
+
+                combined_data = pd.concat(out1,axis=1)
+                for v in ['d_costs', 'd_qalys', 'NMB', 'd_costs_NNI', 'NMB_NNI']:
+                    combined_data[v+'_tot'] = combined_data[[v+'_'+occl for occl in ['ICA', 'M1', 'M2']]].sum(axis=1)
+
+                combined_data['NNI']  = NNI
+                combined_data['fu_years'] = year
+                combined_data['evt_shift'] = evt_shift 
+
+                data = pd.concat(out2,axis=1)
+                data['NNI']  = NNI
+                data['fu_years'] = year
+                data['evt_shift'] = evt_shift
+
+                OUT1.append(combined_data)
+                OUT2.append(data)
+
+    OUT1 = pd.concat(OUT1,axis=0).reset_index()
+    OUT2 = pd.concat(OUT2,axis=0).reset_index()
+    
+    OUT1.to_pickle(os.path.join(loc,'combined_detection_res.pic'))
+    OUT2.to_pickle(os.path.join(loc,'separate_detection_res.pic'))
+
+    return OUT1, OUT2

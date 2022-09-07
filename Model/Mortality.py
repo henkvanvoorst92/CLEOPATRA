@@ -18,6 +18,7 @@ class Mortality(object):
 				 HR_mrs = np.array([1.5325,2.175,3.172,4.5525,6.55]),
 				 delta_HR_mrs = np.array([1.54,2.18,3.18,4.56,6.5575]),
 				 years = np.arange(2021,2030), verbal=False, seed=21):
+
 		np.random.seed(seed)
 		self.verbal = verbal
 
@@ -32,10 +33,13 @@ class Mortality(object):
 		
 		# HR from data by Hong et al: https://pubmed.ncbi.nlm.nih.gov/20133917/
 		self.HR_mrs_deterministic = HR_mrs
-		self.HR_mrs_deterministic_org = HR_mrs.copy()
 		self.delta_HR_mrs = delta_HR_mrs
-		self.delta_HR_mrs_org = delta_HR_mrs.copy()
 		self._init_HR(mode='default')
+
+		#set original variables for sens analyses
+		self.HR_mrs_deterministic_org = HR_mrs.copy()
+		self.delta_HR_mrs_org = delta_HR_mrs.copy()
+		#self.diff_HR_mrs = HR_mrs-delta_HR_mrs
 
 	def _init_HR(self, mode='default'):
 		if mode=='default':
@@ -59,22 +63,20 @@ class Mortality(object):
 		#if current returns the current variables
 		#else the original df is loaded --> used for PSA/OneWay
 		if not current:
-
 			#simulate only with HR
 			self.HR_mrs_deterministic = self.HR_mrs_deterministic_org.copy()
 			self.delta_HR_mrs = self.delta_HR_mrs_org.copy()
-		#returns values used for simulations --> todo
-		# out = pd.DataFrame(data=[self.HR_mrs_deterministic,self.delta_HR_mrs],
-		#                     ).T
-		# out['object'] = 'M'
+
+		out = pd.DataFrame(self.HR_mrs_deterministic, columns=['value'])
+		out['variable_type'] = ['HR_mort_mrs', 'HR_mort_mrs', 'HR_mort_mrs', 'HR_mort_mrs', 'HR_mort_mrs']
+		out['variable'] = [1,2,3,4,5]#['HR_mort_mrs_01', 'HR_mort_mrs_2', 'HR_mort_mrs_3', 'HR_mort_mrs_4', 'HR_mort_mrs_5']
+		out['object'] = 'M'
 		return out
 
-	def _set_params(self,df):
-		print(1)
-		#sets values used for simulation
-		# df.index = df.varname
-		# self.OR = df.to_dict(orient='index')
-		# self._init_OR(mode='default') #initialize base on self.OR 
+	def _set_params(self,data):
+		#set all params according to a dataframe (data)
+		self.HR_mrs = data[data['variable_type']=='HR_mort_mrs'].sort_values(by='variable')['value'].values
+
 	def __call__(self,sex,year,age, mrs_dist=None):
 		# input mRS distribution (mrs_dist) should always sum up to 1
 		p_mort = self.dct_mort[sex][year][age]
