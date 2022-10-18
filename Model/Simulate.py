@@ -21,11 +21,12 @@ class ControlPatientGeneration(object):
                  p_nums_mrs, #excel file with mrs column and distribution for EVT/noEVT arms 
                  dataset='mrclean', #alternative is hermes data (not reccomended)
                  fix_certainty=True,
-                 verbal=False
+                 verbal=False,
+                 exclude_interaction=False #optional to exclude ICV*EVT interaction effect (used for occlusion detection study)
                  ):
         
         self.verbal = verbal  
-        
+        self.exclude_interaction = exclude_interaction
         #initialize dictionary for OR extraction
         self.p_OR = p_OR
         df = pd.read_excel(self.p_OR)
@@ -53,6 +54,10 @@ class ControlPatientGeneration(object):
             if variable not in self.dct_OR.keys():
                 continue
             ln_OR = np.log(self.dct_OR[variable])
+            #optional to exclude interaction
+            if variable=='noEVT*core_vol' and self.exclude_interaction:
+                ln_OR = 0
+                
             summed_ln_OR += ln_OR*value
         return np.exp(summed_ln_OR) #return an OR
     

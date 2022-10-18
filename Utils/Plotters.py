@@ -11,19 +11,33 @@ def reorder_labels_ix(curr_order,pref_order):
         new_order.append(curr_order.index(lo))
     return new_order
     
-
 def ICER_plot_thresholds(aggrs, name='', 
                          root_fig=None, 
                          minmax_xy=[-.15, .15,-12000,12000],
-                         wtp=80000,color_palette='bwr', multiply_QALY=1):
-    d1 = aggrs[(aggrs.threshold>=70)&(aggrs.threshold<90)]
-    d1['group'] = '>70mL'
-    d2 = aggrs[(aggrs.threshold>=90)&(aggrs.threshold<110)]
-    d2['group'] = '>90mL'
-    d3 = aggrs[aggrs.threshold>=110]
-    d3['group'] = '>110mL'
-    dataplot = pd.concat([d1, d2, d3])
-    dataplot.group.unique()
+                         thresholds = [70,90,110],
+                         variable='icv',
+                         wtp=80000,color_palette='bwr', multiply_QALY=1, ax=None):
+
+    data_thresh = []
+    for c,t in enumerate(thresholds):
+        #for last threshold
+        if c==(len(thresholds)-1):
+            d = aggrs[aggrs.threshold>=t]
+            if variable=='icv':
+                d['group'] = 'ICV>{}mL'.format(t)
+            elif variable=='mmratio':
+                d['group'] = 'MM-ratio>{}'.format(t)
+        #for all others
+        else:
+            d = aggrs[(aggrs.threshold>=t)&(aggrs.threshold<thresholds[c+1])]
+            if variable=='icv':
+                d['group'] = 'ICV>{}mL'.format(t)
+            elif variable=='mmratio':
+                d['group'] = 'MM-ratio>{}'.format(t)
+            
+        data_thresh.append(d)
+
+    dataplot = pd.concat(data_thresh)
     
     dataplot.d_qalys *= multiply_QALY
 
@@ -77,8 +91,8 @@ def single_ICER_plot(dataplot,
     x = np.linspace(min_x, max_x)
     y_b = np.arange(min_y, max_y,50)
     y = wtp*x
-    sns.lineplot(x,np.zeros_like(x),color='grey',linewidth=1)
-    sns.lineplot(np.zeros_like(y_b),y_b,color='grey',linewidth=1,estimator=None)
+    sns.lineplot(x,np.zeros_like(x),color='black',linewidth=1)
+    sns.lineplot(np.zeros_like(y_b),y_b,color='black',linewidth=1,estimator=None)
     sns.scatterplot(data=dataplot,x='d_qalys',y='d_costs',s=10,color=color)
     sns.lineplot(x,y,color='black', linestyle="dashed")
     plt.ylim(min_y, max_y)
@@ -136,6 +150,7 @@ def ICER_plot_sources(dataplot,
 def plot_outcome_per_threshold(aggrs,
                                name,
                                root_fig=None,
+                               xtitle='Ischemic core volume decision threshold (mL)',
                                colors = ['black','black','black','black']):
     if not os.path.exists(root_fig):
         os.makedirs(root_fig)
@@ -152,7 +167,7 @@ def plot_outcome_per_threshold(aggrs,
         ax.fill_between(thr, p25[v],p75[v], alpha=0.3,color=colors[ix])
         if 'd_' in v:
             plt.ylabel('Difference in {} (CTP - no CTP)'.format(vname))
-            plt.xlabel('Ischemic core volume decision threshold (mL)')
+            plt.xlabel(xtitle)
         #plt.title('Costs')
         plt.gcf().subplots_adjust(left=0.25)
         if root_fig is not None:
@@ -249,19 +264,17 @@ def M2_detection_plotter(aggr, nni_mult,name='',fig_loc=None,plette='bwr'): #, l
         plt.savefig(os.path.join(fig_loc,'ICER_{}_NNI_{}.tiff'.format(name,nni_mult)),dpi=300)
     plt.show()
 
-
-
-#pm add dict with varname and title of axis
 def occlusion_detect_plot(aggr, 
                           NNIs=[9.5,18.1], #NNI to consider
                           years=[5,10], #FU years in aggr to consider
                           outcome_dct={'NMB_NNI_tot':'NMB'}, #dictionary with varname in aggr : axis name in plot
                           name='',
+                          separate_plots=False,
                           fig_loc=None,
                           plette='bwr'):
     #fig 5 (A-D)
 
-    aggr['ICER_tot'] = aggr['d_costs_NNI_tot']/aggr['d_qalys_tot']
+    aggr['ICER_tot'] = aggr['d_costs_tot']/aggr['d_qalys_tot']
     sens_gain = (aggr['sens_gain_BL'].astype(np.float32).round(2)*100)
     aggr['sens_gain_BL'] = np.where((sens_gain <-4)|(sens_gain >4),np.full_like(sens_gain ,np.NaN),sens_gain )
     aggr = aggr[~aggr['sens_gain_BL'].isna()]
@@ -286,11 +299,12 @@ def occlusion_detect_plot(aggr,
 
 
         for NNI, yr,title, letter,ax in pairs:
+            ax.axhline(0,ls='-',color='grey')
             ax = sns.boxplot(data=aggr[(aggr['NNI']==NNI)&(aggr['fu_years']==yr)],
                         x='sens_gain_BL',y=varname,
                         hue='EVT effect',
                         palette=plette, ax=ax)
-
+            #ax.hlines(y=0, xmin=-4,xmax=4, linewidth=1, color='black')
             ax.set_ylim((aggr[varname].min()-(abs(aggr[varname].min())*.2), 
                       aggr[varname].max()*1.2))
             ax.legend().remove()
@@ -309,6 +323,23 @@ def occlusion_detect_plot(aggr,
         if fig_loc is not None:
             plt.savefig(os.path.join(fig_loc,'occldetect_{}_{}.tiff'.format(axisname,name)),dpi=300)
         plt.show()  
+    
+        if separate_plots:
+            for NNI, yr,title, letter,ax in pairs:
+                plt.axhline(0,ls='-',color='grey')
+                sns.boxplot(data=aggr[(aggr['NNI']==NNI)&(aggr['fu_years']==yr)],
+                            x='sens_gain_BL',y=varname,
+                            hue='EVT effect',
+                            palette=plette)
+                #plt.hlines(y=0,xmin=-4,xmax=4, linewidth=1, color='black')
+                plt.ylim((aggr[varname].min()-(abs(aggr[varname].min())*.2), 
+                          aggr[varname].max()*1.2))
+                plt.title(title)
+                plt.ylabel(axisname)
+                plt.xlabel('Sensitivity gain relative to baseline (percentage-points)')
+                if fig_loc is not None:
+                    plt.savefig(os.path.join(fig_loc,'{}_NNI-{}_years-{}.tiff'.format(varname,NNI,yr)),dpi=100, bbox_inches='tight')
+                plt.show()   
 
 
 
@@ -318,6 +349,7 @@ def occlusion_detect_icer_plot(aggr,
                                minmax_xy=None,
                                wtp = 80000, 
                                fig_loc = None,
+                               separate_plots=False,
                                multiply_QALY = 1):
     
     aggr = aggr[(aggr['fu_years']==year)&(aggr['NNI']==NNI)]
@@ -356,7 +388,11 @@ def occlusion_detect_icer_plot(aggr,
         y = wtp*x
         sns.lineplot(x,np.zeros_like(x),color='black',linewidth=1, ax=ax)
         sns.lineplot(np.zeros_like(y_b),y_b,color='black',linewidth=1,estimator=None, ax=ax)
-        sns.scatterplot(data=dataplot,x='d_qalys_'+vname,y='d_costs_NNI_'+vname,s=10,color='black', ax=ax)
+        if vname=='tot':
+            costvar = 'd_costs_NNI_'
+        else:
+            costvar = 'd_costs_'
+        sns.scatterplot(data=dataplot,x='d_qalys_'+vname,y=costvar+vname,s=10,color='black', ax=ax)
         sns.lineplot(x,y,color='black', linestyle="dashed", ax=ax)
         ax.set(xlabel=None, ylabel=None)
         ax.set_ylim(min_y, max_y)
@@ -366,7 +402,6 @@ def occlusion_detect_icer_plot(aggr,
         ax.set_title(vname)
         plt.annotate(letter,fontsize=20,xy=(.05,.9), xycoords=ax.transAxes)
 
-
     fig.add_subplot(1, 1, 1, frame_on=False)
     plt.tick_params(labelcolor="none", bottom=False, left=False)
     plt.ylabel('Difference in costs(€) (CTP - CTA+NCCT)', fontsize=15, labelpad=30)
@@ -374,3 +409,41 @@ def occlusion_detect_icer_plot(aggr,
     if fig_loc is not None:
         plt.savefig(os.path.join(fig_loc,'occldetect_icer_year{}_NNI{}.tiff'.format(year,NNI)),dpi=300)
     plt.show()  
+
+    if separate_plots:
+        for dataplot,vname,letter,ax in pairs:
+            dataplot['d_qalys_'+vname] *= multiply_QALY
+            x = np.linspace(min_x, max_x)
+            y_b = np.arange(min_y, max_y,50)
+            y = wtp*x
+            sns.lineplot(x,np.zeros_like(x),color='black',linewidth=1)
+            sns.lineplot(np.zeros_like(y_b),y_b,color='black',linewidth=1,estimator=None)
+            sns.scatterplot(data=dataplot,x='d_qalys_'+vname,y='d_costs_NNI_'+vname,s=10,color='black')
+            sns.lineplot(x,y,color='black', linestyle="dashed")
+            plt.ylabel('Difference in costs(€) (CTP - CTA+NCCT)')
+            plt.xlabel('Difference in QALY (CTP - CTA+NCCT)')
+            plt.ylim(min_y, max_y)
+            plt.xlim(min_x, max_x)
+            if vname=='tot':
+                vname='Total'
+            plt.title(vname)
+            if fig_loc is not None:
+                plt.savefig(os.path.join(fig_loc,'{}_occldetect_icer_year{}_NNI{}.tiff'.format(vname,year,NNI)),dpi=100,bbox_inches='tight')
+            plt.show()  
+
+def plot_survival(year,surv,title=None,xaxis=None, y_range=None, fig_loc=None):
+    if not 0 in year:
+        year.append(0)
+        surv.append(1)
+    if y_range is None:
+        y_range = (.5,1.05)
+    sns.lineplot(x=year,y=surv, drawstyle="steps-pre",color='black')
+    plt.ylim(y_range)
+    if title is None:
+        plt.title('Simulated survival of cohort with EVT')
+    if xaxis is None:
+        plt.xlabel('Years since acute ischemic stroke', fontsize=12)
+    plt.ylabel('Survival', fontsize=12)
+    if fig_loc is not None:
+        plt.savefig(os.path.join(fig_loc,'survival_baseline.tiff'),dpi=300)
+    plt.show()

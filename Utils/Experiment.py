@@ -70,6 +70,7 @@ def probabilistic_simulation(S,df,N_resamples,N_patients_per_cohort,xvar='core_v
     #xvar: what variable from df (core_vol, penumbra_vol, or mm-ratio) 
     #should be used with ORs to compute control arm
     #returns: similar to return of simulate_IDs but per N_resmaples iteration
+
     np.random.seed(seed)
     tots,exts = [],[]
     for i in tqdm(range(N_resamples)):
@@ -94,8 +95,8 @@ def probabilistic_simulation(S,df,N_resamples,N_patients_per_cohort,xvar='core_v
         tots.append(totals_res)
         exts.append(extend_res)
     
-    totals_res = pd.concat(tots)
-    extend_res = pd.concat(exts)
+    totals_res = pd.concat(tots) #includes results (d_costs, d_qalys, NMB, ICER)
+    extend_res = pd.concat(exts) #also has mRS per year and costs/qalys per arm
     
     return totals_res, extend_res
 
@@ -105,6 +106,7 @@ def subgroup_psa(df,
                  N_resamples,
                  N_patients_per_cohort='auto',
                  thresholds=np.arange(0,151,10),
+                 larger_smaller='larger',
                  costs_per_ctp=0,
                  multiply_ctp_costs=0,
                  miss_percentage=[0],
@@ -132,6 +134,8 @@ def subgroup_psa(df,
 
         outs, aggrs,__ = probabilistic_cohort_outcomes(totals_res,
                                                     bl_dct,
+                                                    thresholds = thresholds,
+                                                    larger_smaller=larger_smaller,
                                                     costs_per_ctp=costs_per_ctp,
                                                     multiply_ctp_costs = multiply_ctp_costs,
                                                     miss_percentage = miss_percentage,
@@ -196,6 +200,7 @@ def OR_shift_psa(df,
                  N_resamples,
                  N_patients_per_cohort,
                  thresholds=np.arange(0,151,10),
+                 larger_smaller='larger', #no EVT if above threshold
                  WTP=80000,
                  xvar = 'core_vol',
                  root_sav=None,
@@ -234,6 +239,8 @@ def OR_shift_psa(df,
 
             outs, aggrs, fr = probabilistic_cohort_outcomes(totals_res,
                                                         bl_dct,
+                                                        thresholds=thresholds,
+                                                        larger_smaller=larger_smaller,
                                                         costs_per_ctp=0, #should only be used for M2 miss sims
                                                         multiply_ctp_costs = 0, #should only be used for M2 miss sims
                                                         miss_percentage = [0], #should only be used for M2 miss sims
@@ -376,7 +383,7 @@ def occl_detect_psa(df,
                  seed=21):
     np.random.seed(seed)
     #function runs PSA simulations
-    
+
     if root_sav is not None:
         if not os.path.exists(root_sav):
             os.makedirs(root_sav)
@@ -454,7 +461,7 @@ def oneway_data(S,up=.1,down=.1):
     data['down'] = data['value'].copy()*(1-down)
     return data
 
-def BL_sim(S,df, thresholds=[70], WTP=80000):
+def BL_sim(S,df, thresholds=[70], larger_smaller='larger', WTP=80000):
     bl_cols = ['core_vol', 'penumbra_vol', 'mm_ratio', 'bl_occloc',
            'r_age', 'bl_nihss_sum', 't_otg','r_sex','ivt_given', 
             'bl_collaterals','bl_hist_premrs','iat_post_etici',
@@ -468,6 +475,7 @@ def BL_sim(S,df, thresholds=[70], WTP=80000):
     # of the cohort per different decision threshold
     __,aggr = cohort_outcome(totals_res,
                             thresholds=thresholds, 
+                            larger_smaller=larger_smaller,
                             costs_per_ctp=0, #used for miss rate sim
                             multiply_ctp_costs = 0,#used for miss rate sim -->perform only on M2
                             miss_percentage = [0],#used for miss rate sim
@@ -475,7 +483,7 @@ def BL_sim(S,df, thresholds=[70], WTP=80000):
     return aggr
 
 
-def oneway_sensitivity(S,data,df, root_sav=None):
+def oneway_sensitivity(S,data,df,larger_smaller='larger', root_sav=None):
     #S: simulation object
     #data: contains columns up and down 
     # used as range for oneway sensitivity analysis
@@ -494,11 +502,11 @@ def oneway_sensitivity(S,data,df, root_sav=None):
         #run lower sim
         tmpdata.at[ix,'value'] = row['down']
         S._set_all_params(tmpdata)
-        lower = BL_sim(S,df)
+        lower = BL_sim(S,df,larger_smaller=larger_smaller)
         #run upper sim
         tmpdata.at[ix,'value'] = row['up']
         S._set_all_params(tmpdata)
-        upper = BL_sim(S,df)
+        upper = BL_sim(S,df,larger_smaller=larger_smaller)
 
         lower.columns = [c+'_lower' for c in lower]
         upper.columns = [c+'_upper' for c in upper]
@@ -514,14 +522,12 @@ def oneway_sensitivity(S,data,df, root_sav=None):
         out.to_excel(os.path.join(root_sav,'oneway_sensitivity.xlsx'))
     return out
 
-
-
 def BL_sim_occlusion_detect(S,
                             df,
                             sens_dct={'ICA':.08,'M1':.16,'M2':.16},
-                            NNI=9.5,
-                            WTP=80000):
-
+                            NNI=8.3,
+                            WTP=80000, 
+                            use_median=False):
 
     bl_cols = ['core_vol', 'penumbra_vol', 'mm_ratio', 'bl_occloc',
            'r_age', 'bl_nihss_sum', 't_otg','r_sex','ivt_given', 
@@ -549,6 +555,45 @@ def BL_sim_occlusion_detect(S,
 
     __, aggr = cohort_outcome_occlusion_detection(res_tot.copy(), 
                                            costs_per_ctp=S.C.costs_CTP, 
-                                           WTP = 80000)
+                                           WTP = 80000, use_median=use_median)
 
     return aggr
+
+def oneway_sensitivity_occlusion_detect(S,data,df, root_sav=None,name='', use_median=False, NNI=8.3):
+    #S: simulation object
+    #data: contains columns up and down 
+    # used as range for oneway sensitivity analysis
+    #df: dataframe with patients
+    bl = BL_sim_occlusion_detect(S,df, use_median=use_median, NNI=NNI)
+    #add lower upper for dataframe consistency
+    lower, upper = bl.copy(), bl.copy()
+    lower.columns = [c+'_lower' for c in lower]
+    upper.columns = [c+'_upper' for c in upper]
+    row = pd.concat([lower,upper],axis=1)
+    row['variable'] = 'baseline'
+
+    out = [row]
+    for ix,row in tqdm(data.iterrows()):
+        tmpdata = data.copy()
+        #run lower sim
+        tmpdata.at[ix,'value'] = row['down']
+        S._set_all_params(tmpdata)
+        lower = BL_sim_occlusion_detect(S,df, use_median=use_median, NNI=NNI)
+        #run upper sim
+        tmpdata.at[ix,'value'] = row['up']
+        S._set_all_params(tmpdata)
+        upper = BL_sim_occlusion_detect(S,df, use_median=use_median, NNI=NNI)
+
+        lower.columns = [c+'_lower' for c in lower]
+        upper.columns = [c+'_upper' for c in upper]
+        row = pd.concat([lower,upper],axis=1)
+        row['variable'] = ix
+
+        out.append(row)
+    out = pd.concat(out)
+    
+    if root_sav is not None:
+        if not os.path.exists(root_sav):
+            os.makedirs(root_sav)
+        out.to_excel(os.path.join(root_sav,'oneway_sensitivity{}.xlsx'.format(name)))
+    return out

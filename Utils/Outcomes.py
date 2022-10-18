@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 def probabilistic_cohort_outcomes(df_psa, 
                                 bl_dct,
                                thresholds=np.arange(0,151,10),
+                               larger_smaller='larger',
                                costs_per_ctp=0,
                                multiply_ctp_costs = 0,
                                miss_percentage = [0],
@@ -27,6 +28,7 @@ def probabilistic_cohort_outcomes(df_psa,
         #compute cohort results separately
         out,aggr = cohort_outcome(df_res,
                                 thresholds=thresholds, 
+                                larger_smaller=larger_smaller,
                                 costs_per_ctp=costs_per_ctp,
                                 multiply_ctp_costs=multiply_ctp_costs,
                                 miss_percentage=miss_percentage,
@@ -45,9 +47,10 @@ def probabilistic_cohort_outcomes(df_psa,
 
 def cohort_outcome(df_res, 
                    thresholds=np.arange(0,151,10),
+                   larger_smaller='larger',
                    costs_per_ctp=0, 
                    multiply_ctp_costs=0, #NNI multiplier
-                   miss_percentage=[0],
+                   miss_percentage=[0], #used for occlusion detection
                    WTP = 80000):
      #converts totals_res to depict results per core_volume decision threshold
      #also can be used to simulate miss_percentage of M2s
@@ -75,10 +78,16 @@ def cohort_outcome(df_res,
             noCTP['Q_noctp'] = noCTP['Q_noctp_evt']+noCTP['Q_noctp_noevt']
 
             ###control arm with CTP
-            noEVT = df_res[df_res['core_vol']>=thr][['ID','C_ctp_noevt','Q_ctp_noevt']]
+            #threshold larger or smaller than threshold
+            if larger_smaller=='larger':#larger than threshold means no EVT
+                noEVT = df_res[df_res['core_vol']>=thr][['ID','C_ctp_noevt','Q_ctp_noevt']]
+                EVT = df_res[df_res['core_vol']<thr][['ID','C_ctp_evt','Q_ctp_evt']]
+            elif larger_smaller=='smaller': #smaller than threshold means no EVT
+                noEVT = df_res[df_res['core_vol']<=thr][['ID','C_ctp_noevt','Q_ctp_noevt']]
+                EVT = df_res[df_res['core_vol']>thr][['ID','C_ctp_evt','Q_ctp_evt']]
+
             noEVT.columns = ['ID','C_ctp', 'Q_ctp']
             noEVT['altered_decision'] = True
-            EVT = df_res[df_res['core_vol']<thr][['ID','C_ctp_evt','Q_ctp_evt']]
             EVT.columns = ['ID','C_ctp', 'Q_ctp']
             EVT['altered_decision']=False
             #combine noEVT and EVT with CTP vertically (every patient only once)
@@ -107,8 +116,7 @@ def cohort_outcome(df_res,
 
 def cohort_outcome_occlusion_detection(df_res, 
                                        costs_per_ctp=0, 
-                                       WTP = 80000):
-
+                                       WTP = 80000, use_median=False):
     mp = df_res['sens_gain'].values
     miss_mat = np.array([1-mp,1-mp,mp,mp]).T
 
@@ -123,7 +131,7 @@ def cohort_outcome_occlusion_detection(df_res,
     CTP = df_res[['ID','C_ctp_evt','Q_ctp_evt']].copy().drop(columns='ID')
     CTP.columns = ['C_ctp', 'Q_ctp']
     #add ctp costs
-    CTP['C_ctp'] += np.clip((df_res['NNI']-1)*200,0,1e9)
+    CTP['C_ctp'] += np.clip((df_res['NNI']-1)*costs_per_ctp,0,1e9)
 
     outcome = pd.DataFrame()
     outcome[['C_ctp','Q_ctp']] = CTP[['C_ctp', 'Q_ctp']] 
@@ -132,7 +140,10 @@ def cohort_outcome_occlusion_detection(df_res,
     outcome['d_qalys'] = CTP['Q_ctp']-noCTP['Q_noctp']
     outcome['NMB'] = outcome['d_qalys']*WTP+outcome['d_costs']*-1
     
-    aggr = outcome.mean()
+    if use_median:
+        aggr = outcome.median()
+    else:
+        aggr = outcome.mean()
     aggr['ICER'] = aggr['d_costs']/aggr['d_qalys']
     aggr['NNI'] = df_res['NNI'].values[0]
     aggr['sens_gain'] = list(np.unique(mp))
@@ -142,9 +153,7 @@ def cohort_outcome_occlusion_detection(df_res,
 def median_iqr_results(df_median,df_p25,df_p75, threshold, colname='', qaly_multiplier=1):
     variables = df_median.columns
     
-    n_digits = 7
-    if qaly_multiplier>100:
-        n_digits = 2
+
     
     combined = []
     for v in variables:
@@ -155,11 +164,15 @@ def median_iqr_results(df_median,df_p25,df_p75, threshold, colname='', qaly_mult
             p25 = df_p25.loc[threshold].loc[v]
             p75 = df_p75.loc[threshold].loc[v]
             if 'q_' in v.lower() or 'd_qalys' in v.lower():
+                n_digits = 3
+                if qaly_multiplier>100:
+                    n_digits = 2
                 value = '{} ({};{})'.format(round(m*qaly_multiplier,n_digits),
                                            round(p25*qaly_multiplier,n_digits),
                                            round(p75*qaly_multiplier,n_digits))
                 combined.append(value)
             else:
+                m, p25,p75 = round(m,2),round(p25,2),round(p75,2)
                 value = '{} ({};{})'.format(m.astype(int),p25.astype(int),p75.astype(int))
                 combined.append(value)
         else:
@@ -272,6 +285,7 @@ def combine_occloc_results(loc, #path to stored results )(f1)
                     data['missed_M2'] = data['missed_M2'].astype(np.float32).round(2)
                     data = data.sort_values(by=['missed_M2','simno'])
 
+                    #separate for each location attach NNI screening costs
                     combined_data = data[~data['sens_gain_BL'].isna()]
                     combined_data = combined_data.set_index(['simno','sens_gain_BL'])
                     combined_data = combined_data[['d_costs','d_qalys','NMB']]
@@ -286,20 +300,32 @@ def combine_occloc_results(loc, #path to stored results )(f1)
                     data.columns = [c+'_'+occloc for c in data.columns]
                     out2.append(data)
 
-                combined_data = pd.concat(out1,axis=1)
-                for v in ['d_costs', 'd_qalys', 'NMB', 'd_costs_NNI', 'NMB_NNI']:
-                    combined_data[v+'_tot'] = combined_data[[v+'_'+occl for occl in ['ICA', 'M1', 'M2']]].sum(axis=1)
+                #create a total res file taking the weight of each location
+                cd = pd.concat(out1,axis=1)
+                cd['d_qalys_tot'] = cd['d_qalys_ICA']*frac_dct['ICA']+\
+                                    cd['d_qalys_M1']*frac_dct['M1']+\
+                                    cd['d_qalys_M2']*frac_dct['M2']
 
-                combined_data['NNI']  = NNI
-                combined_data['fu_years'] = year
-                combined_data['evt_shift'] = evt_shift 
+                cd['d_costs_tot'] = cd['d_costs_ICA']*frac_dct['ICA']+\
+                                    cd['d_costs_M1']*frac_dct['M1']+\
+                                    cd['d_costs_M2']*frac_dct['M2']+\
+                                    costs_CTP*NNI
+                cd['NMB_tot'] = WTP*cd['d_qalys_tot']+cd['d_costs_tot']*-1
+
+                #for figure making
+                cd['NMB_NNI_tot'] = cd['NMB_tot']
+                cd['d_costs_NNI_tot'] = cd['d_costs_tot']
+
+                cd['NNI']  = NNI
+                cd['fu_years'] = year
+                cd['evt_shift'] = evt_shift 
 
                 data = pd.concat(out2,axis=1)
                 data['NNI']  = NNI
                 data['fu_years'] = year
                 data['evt_shift'] = evt_shift
 
-                OUT1.append(combined_data)
+                OUT1.append(cd)
                 OUT2.append(data)
 
     OUT1 = pd.concat(OUT1,axis=0).reset_index()
