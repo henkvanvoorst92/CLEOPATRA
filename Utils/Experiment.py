@@ -62,7 +62,7 @@ def simulate_IDs(IDs,df,Simulator,xvar='core_vol', verbal=True):
     return totals_res, extend_res
 
 
-def probabilistic_simulation(S,df,N_resamples,N_patients_per_cohort,xvar='core_vol',seed=21):
+def probabilistic_simulation(S,df,N_resamples,N_patients_per_cohort,biased_threshold_sample=None,xvar='core_vol',seed=21):
     #S: initialized Simulate class object (contains all the data and methods)
     #df: dataframe with index=ID and columns with patient variables
     #N_resamples: Number of probabilistic resamples to run
@@ -70,6 +70,7 @@ def probabilistic_simulation(S,df,N_resamples,N_patients_per_cohort,xvar='core_v
     #xvar: what variable from df (core_vol, penumbra_vol, or mm-ratio) 
     #should be used with ORs to compute control arm
     #returns: similar to return of simulate_IDs but per N_resmaples iteration
+    #biased_threshold_sample: dictionary with variable_colume, threshold, smaller_larger, percentage bias
 
     np.random.seed(seed)
     tots,exts = [],[]
@@ -82,7 +83,23 @@ def probabilistic_simulation(S,df,N_resamples,N_patients_per_cohort,xvar='core_v
         S._probabilistic_resample()
         #print(S.CPG.dct_OR)
         #sample a cohort of IDs with replaceemnt
-        smpl = df.sample(nppc,replace=True, random_state=i).index
+        if biased_threshold_sample is None:
+            smpl = df.sample(nppc,replace=True, random_state=i).index
+        else:
+            colvar = biased_threshold_sample['variable_column']
+            thr = biased_threshold_sample['threshold']
+            larger_smaller = biased_threshold_sample['larger_smaller']
+            if larger_smaller=='larger':
+                condition = (df[colvar]>=thr)
+            elif larger_smaller=='smaller':
+                condition = (df[colvar]<=thr)
+            bias_n_pt = int(round(biased_threshold_sample['bias_percentage']*nppc))
+            non_bias_pt = nppc-bias_n_pt
+
+            bias_smpl = df[condition].sample(bias_n_pt,replace=True, random_state=i).index
+            nonbias_smpl = df[~condition].sample(non_bias_pt,replace=True, random_state=i).index
+            smpl = np.hstack([bias_smpl,nonbias_smpl])
+
         #simulation output
         totals_res, extend_res = simulate_IDs(smpl,df,S,xvar,False)
         totals_res['simno'] = i
@@ -201,6 +218,7 @@ def OR_shift_psa(df,
                  N_patients_per_cohort,
                  thresholds=np.arange(0,151,10),
                  larger_smaller='larger', #no EVT if above threshold
+                 biased_threshold_sample = None, #biased_threshold_sample: dictionary with variable_column, threshold, smaller_larger, percentage bias
                  WTP=80000,
                  xvar = 'core_vol',
                  root_sav=None,
@@ -235,7 +253,9 @@ def OR_shift_psa(df,
             totals_res,extend_res = probabilistic_simulation(Sim,
                                                              df,
                                                              N_resamples,
-                                                             nppc, xvar=xvar)
+                                                             nppc,
+                                                             biased_threshold_sample=biased_threshold_sample,
+                                                             xvar=xvar)
 
             outs, aggrs, fr = probabilistic_cohort_outcomes(totals_res,
                                                         bl_dct,
@@ -483,12 +503,12 @@ def BL_sim(S,df, thresholds=[70], larger_smaller='larger', WTP=80000):
     return aggr
 
 
-def oneway_sensitivity(S,data,df,larger_smaller='larger', root_sav=None):
+def oneway_sensitivity(S,data,df,larger_smaller='larger', thresholds=[70], root_sav=None):
     #S: simulation object
     #data: contains columns up and down 
     # used as range for oneway sensitivity analysis
     #df: dataframe with patients
-    bl = BL_sim(S,df)
+    bl = BL_sim(S,df,thresholds=thresholds,larger_smaller=larger_smaller)
     #add lower upper for dataframe consistency
     lower, upper = bl.copy(), bl.copy()
     lower.columns = [c+'_lower' for c in lower]
@@ -502,11 +522,11 @@ def oneway_sensitivity(S,data,df,larger_smaller='larger', root_sav=None):
         #run lower sim
         tmpdata.at[ix,'value'] = row['down']
         S._set_all_params(tmpdata)
-        lower = BL_sim(S,df,larger_smaller=larger_smaller)
+        lower = BL_sim(S,df, thresholds=thresholds, larger_smaller=larger_smaller)
         #run upper sim
         tmpdata.at[ix,'value'] = row['up']
         S._set_all_params(tmpdata)
-        upper = BL_sim(S,df,larger_smaller=larger_smaller)
+        upper = BL_sim(S,df, thresholds=thresholds, larger_smaller=larger_smaller)
 
         lower.columns = [c+'_lower' for c in lower]
         upper.columns = [c+'_upper' for c in upper]

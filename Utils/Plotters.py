@@ -16,24 +16,28 @@ def ICER_plot_thresholds(aggrs, name='',
                          minmax_xy=[-.15, .15,-12000,12000],
                          thresholds = [70,90,110],
                          variable='icv',
+                         per=1,
                          wtp=80000,color_palette='bwr', multiply_QALY=1, ax=None):
 
     data_thresh = []
     for c,t in enumerate(thresholds):
         #for last threshold
         if c==(len(thresholds)-1):
-            d = aggrs[aggrs.threshold>=t]
             if variable=='icv':
-                d['group'] = 'ICV>{}mL'.format(t)
+                d = aggrs[aggrs.threshold>=t]
+                d['group'] = 'ICV≥{}mL'.format(t)
             elif variable=='mmratio':
-                d['group'] = 'MM-ratio>{}'.format(t)
+                d = aggrs[aggrs.threshold<=t]
+                d['group'] = 'MMR≤{}'.format(t)
         #for all others
         else:
             d = aggrs[(aggrs.threshold>=t)&(aggrs.threshold<thresholds[c+1])]
             if variable=='icv':
-                d['group'] = 'ICV>{}mL'.format(t)
+                d = aggrs[(aggrs.threshold>=t)&(aggrs.threshold<thresholds[c+1])]
+                d['group'] = 'ICV≥{}mL'.format(t)
             elif variable=='mmratio':
-                d['group'] = 'MM-ratio>{}'.format(t)
+                d = aggrs[(aggrs.threshold<=t)&(aggrs.threshold>thresholds[c+1])]
+                d['group'] = 'MMR≤{}'.format(t)
             
         data_thresh.append(d)
 
@@ -49,6 +53,7 @@ def ICER_plot_thresholds(aggrs, name='',
     else:
         min_x, max_x, min_y, max_y = minmax_xy
     
+
     x = np.linspace(min_x, max_x)
     y_b = np.arange(min_y, max_y,50)
     y = wtp*x
@@ -62,6 +67,11 @@ def ICER_plot_thresholds(aggrs, name='',
     plt.xlim(min_x, max_x)
     plt.ylabel('Difference in costs(€) (CTP - no CTP)')
     plt.xlabel('Difference in QALY (CTP - no CTP)')
+    if per>10:
+        plt.ticklabel_format(useOffset=False)
+        plt.ylabel('Difference in costs(€) per {} patients'.format(per))
+        plt.xlabel('Difference in QALYs per {} patients'.format(per))
+
     plt.gcf().subplots_adjust(left=0.15)
     if root_fig is not None:  
         if not os.path.exists(root_fig):
@@ -75,6 +85,7 @@ def single_ICER_plot(dataplot,
                      root_fig=None, #if a path the figure is saved
                      minmax_xy=None,#[-.15, .15,-12000,12000],
                      color='black',
+                     per=1,
                      wtp=80000, multiply_QALY=1):
     
     if minmax_xy is None:
@@ -99,6 +110,11 @@ def single_ICER_plot(dataplot,
     plt.xlim(min_x, max_x)
     plt.ylabel('Difference in costs(€) (CTP - no CTP)')
     plt.xlabel('Difference in QALY (CTP - no CTP)')
+    if per>10:
+        plt.ticklabel_format(useOffset=False)
+        plt.ylabel('Difference in costs(€) per {} patients'.format(per))
+        plt.xlabel('Difference in QALYs per {} patients'.format(per))
+
     plt.gcf().subplots_adjust(left=0.15)
     if root_fig is not None:  
         if not os.path.exists(root_fig):
@@ -106,10 +122,12 @@ def single_ICER_plot(dataplot,
         plt.savefig(os.path.join(root_fig,'ICER_plot_{}.tiff'.format(name)),dpi=300)
     plt.show()
 
+    
 def ICER_plot_sources(dataplot, 
                      name='', 
                      root_fig=None, #if a path the figure is saved
                      minmax_xy=None,#[-.15, .15,-12000,12000],
+                     per = 1,
                      color_palette='bright',
                      wtp=80000, multiply_QALY=1):
     
@@ -127,25 +145,34 @@ def ICER_plot_sources(dataplot,
     x = np.linspace(min_x, max_x)
     y_b = np.arange(min_y, max_y,50)
     y = wtp*x
-    sns.lineplot(x,np.zeros_like(x),color='grey',linewidth=1)
-    sns.lineplot(np.zeros_like(y_b),y_b,color='grey',linewidth=1,estimator=None)
+    ax = sns.lineplot(x,np.zeros_like(x),color='grey',linewidth=1)
+    sns.lineplot(np.zeros_like(y_b),y_b,color='grey',linewidth=1,estimator=None, ax=ax)
     sns.scatterplot(data=dataplot,
                     x='d_qalys',y='d_costs', 
                     hue='source', 
                     s=5,alpha=.5,
-                    palette=color_palette)
-    sns.lineplot(x,y,color='black', linestyle="dashed")
-    plt.ylim(min_y, max_y)
-    plt.xlim(min_x, max_x)
-    plt.ylabel('Difference in costs(€) (CTP - no CTP)')
-    plt.xlabel('Difference in QALY (CTP - no CTP)')
+                    palette=color_palette, ax=ax)
+    sns.lineplot(x,y,color='black', linestyle="dashed", ax=ax)
+    ax.set_ylim(min_y, max_y)
+    ax.set_xlim(min_x, max_x)
+
+    if per>10:
+        ax.ticklabel_format(useOffset=False)
+        ax.set_ylabel('Difference in costs (million €) per {} patients'.format(per))
+        ax.set_xlabel('Difference in QALYs per {} patients'.format(per))
+        scale_y = 1e6
+        ticks_y = ticker.FuncFormatter(lambda x, pos: '{0:g}'.format(x/scale_y))
+        ax.yaxis.set_major_formatter(ticks_y)
+    else:
+        ax.ylabel('Difference in costs (€) (CTP - no CTP)')
+        ax.xlabel('Difference in QALY (CTP - no CTP)')
+
     plt.gcf().subplots_adjust(left=0.15)
     if root_fig is not None:  
         if not os.path.exists(root_fig):
             os.makedirs(root_fig)
         plt.savefig(os.path.join(root_fig,'ICER_plot_{}.tiff'.format(name)),dpi=300)
     plt.show()
-
 
 def plot_outcome_per_threshold(aggrs,
                                name,

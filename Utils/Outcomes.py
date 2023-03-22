@@ -150,10 +150,8 @@ def cohort_outcome_occlusion_detection(df_res,
 
     return outcome, pd.DataFrame(aggr).T
 
-def median_iqr_results(df_median,df_p25,df_p75, threshold, colname='', qaly_multiplier=1):
+def median_iqr_results(df_median,df_p25,df_p75, threshold, colname='', qaly_multiplier=1, verbal=False):
     variables = df_median.columns
-    
-
     
     combined = []
     for v in variables:
@@ -178,6 +176,7 @@ def median_iqr_results(df_median,df_p25,df_p75, threshold, colname='', qaly_mult
         else:
             value = df_median.loc[threshold].loc[v]
             combined.append(value)
+
         #print(v,value)
     #return pd.DataFrame(data=combined,index=variables,columns=[colname])
     return combined
